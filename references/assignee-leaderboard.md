@@ -47,7 +47,3 @@ On the table, not per row:
 
 `https://ace.cimenviro.com/reports/tickets?site_ids={site_id}&grouping=assignee&relative_date=last_90_days&include_today=true`
 
-## Notes to print
-
-- Resolved counts the window; Open now is a snapshot as at today with no date bound, so the two columns cover different spans by design.
-- The Total row comes from each query's `pagination.total`, not from summing the rows above.
