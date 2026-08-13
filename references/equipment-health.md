@@ -1,6 +1,6 @@
 # Equipment health snapshot
 
-Health by equipment type, over the last 3 complete months plus the current month to date.
+Health by equipment type, over the last 3 complete months plus the current month to date — four columns.
 
 ## Columns
 
@@ -9,29 +9,49 @@ Health by equipment type, over the last 3 complete months plus the current month
 | Equipment type | Types with at least one scored rule |
 | Equipment | Distinct equipment of that type carrying a scored rule |
 | Rules | Distinct scored rules on that type |
-| Four month columns | Equipment health score for that month, `x.xx%` |
+| Four month columns | Equipment health score for that month, `x.x%` |
 | Chg | Current month minus start month, in pp |
 
-## Data recipe
+## Bands
 
-`search_equipment_health_scores` over the window, grouped by equipment type for the rows and by site for the rollup — each at `month` for the cells and `all` for the counts. Resolve the returned type ids to names with `search_equipment_types`.
+Score cells are conditionally formatted against these thresholds:
 
-`score` is a `0.0–1.0` fraction; `equipment_count` and `task_count` are the Equipment and Rules columns.
+| Band | Score | Fill |
+| --- | --- | --- |
+| Excellent | ≥ 99% | success, strong |
+| Good | ≥ 97% | success, light |
+| Average | ≥ 90% | warning |
+| Poor | < 90% | danger |
 
-Counts come from the `all` calls only — never sum the months and never read one month. `all` counts distinct equipment and rules across the whole window, so it is legitimately higher than any single month.
+Print the key under the table: `Excellent ≥99 · Good ≥97 · Average ≥90 · Poor <90`.
+
+- `score` comes back as a raw `0.0–1.0` fraction — multiply by 100 and print to **1dp**. Format on the raw value, not the rounded one: these bands sit close together, so a score that rounds up onto an edge keeps the fill its raw value earned.
+- The cell holds the number and nothing else — `99.2`, coloured. In the markdown fallback it is the bare number and the key carries the thresholds.
+- Two greens for Excellent and Good rather than green and blue: one container step per colour would collapse the two bands holding most of the data, and blue is the accent, already carrying the links.
 
 ## Display
+
+Band heatmap: one row per equipment type, months as columns, each score cell filled with its band, the numeral still legible on the fill. Equipment, Rules and Chg flank it uncoloured.
 
 - Sort by Chg descending, so the biggest improvement leads and any decline closes.
 - Site row sits after the sort, separated from it.
 - Show every equipment type, not a sample.
 - Exclude equipment type `BACER` / `Bacer (System)` — platform health checks, not building plant.
+- Bold the current month column only. A grid of bold figures reads as noise.
+- Mark the current month `*` in the header and footnote it `* partial, to date`.
+- Chg is signed with a glyph: `▲ +0.4`, `▼ -0.8`, `– 0.0`. Leave it uncoloured — it is a movement, not a score, and the bands do not apply to it.
 
-## Link
+## Links
 
-Per type, on the row label:
+Row label, over the full window:
 
 `https://ace.cimenviro.com/dashboard/equipment-health?site_ids={site_id}&start_date={window_start}T00:00:00.000&end_date={today}T00:00:00.000&equipment_type_ids={type_id}`
 
+Score cell, the same URL with `start_date` / `end_date` scoped to that month alone.
+
 The Site row uses the same URL without `equipment_type_ids`.
 
+## Notes to print
+
+- Counts are distinct equipment and rules across the whole window, so they exceed any single month.
+- The Site row is its own rollup call, not the average of the rows above.

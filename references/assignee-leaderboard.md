@@ -1,6 +1,6 @@
 # Assignee leaderboard
 
-Who closed the work, over the last 90 days.
+Who closed the work, over the last 90 days including today.
 
 ## Columns
 
@@ -12,6 +12,8 @@ Who closed the work, over the last 90 days.
 | Resolved | Actions resolved in the window |
 | Completion rate | `resolved / (resolved + open now)` as a percentage |
 | Open now | Actions currently open, as at today |
+
+No bands. Completion rate is a rate against a track, not a score against a benchmark, so there is no key to print under this table.
 
 ## Data recipe
 
@@ -28,10 +30,12 @@ There is no server-side group-by, so the per-assignee counts are made here. Each
 
 ## Display
 
+Ranked rows, not a heatmap — one rate and some counts, not a score moving across months.
+
 - Rank by Resolved descending, tie-break on completion rate descending.
-- 🏆 replaces the rank numeral at 1. Nothing on 2 or 3.
-- Completion rate is a 10-character bar with the value beside it: `████████░░ 82%`.
-- Resolved and Open now are plain numerals. No bars.
+- Rank stays a plain numeral all the way down — no marker on the leader. Bold the top row if it needs to stand out.
+- Completion rate is a bar on a 0–100 track with the value beside it — one accent fill on a plain track, never coloured by value, which would put two scales in one table. In the markdown fallback, 10 characters: `████████░░ 82%`.
+- Rank, Resolved and Open now are plain numerals. No bars.
 - Open now is bolded when non-zero, left plain at zero.
 - Actions with no assignee are not ranked — carry them in a trailing `Unassigned` row so the Total still reconciles.
 - Close with a bold Total row, separated from the rank.
@@ -43,4 +47,7 @@ On the table, not per row:
 
 `https://ace.cimenviro.com/reports/tickets?site_ids={site_id}&grouping=assignee&relative_date=last_90_days&include_today=true`
 
+## Notes to print
 
+- Resolved counts the window; Open now is a snapshot as at today with no date bound, so the two columns cover different spans by design.
+- The Total row comes from each query's `pagination.total`, not from summing the rows above.
