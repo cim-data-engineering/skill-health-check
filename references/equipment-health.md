@@ -51,7 +51,3 @@ Score cell, the same URL with `start_date` / `end_date` scoped to that month alo
 
 The Site row uses the same URL without `equipment_type_ids`.
 
-## Notes to print
-
-- Counts are distinct equipment and rules across the whole window, so they exceed any single month.
-- The Site row is its own rollup call, not the average of the rows above.
