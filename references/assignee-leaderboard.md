@@ -1,6 +1,6 @@
 # Assignee leaderboard
 
-Who closed the work, over the last 6 complete months.
+Who closed the work, over the last 90 days.
 
 ## Columns
 
@@ -41,7 +41,6 @@ There is no server-side group-by, so the per-assignee counts are made here. Each
 
 On the table, not per row:
 
-`https://ace.cimenviro.com/reports/tickets?site_ids={site_id}&start_date={window_start}T00:00:00.000&end_date={window_last_day}T00:00:00.000&grouping=assignee`
+`https://ace.cimenviro.com/reports/tickets?site_ids={site_id}&grouping=assignee&relative_date=last_90_days&include_today=true`
 
-`window_last_day` is the last day of the last complete month — for a window ending `2026-08-01`, that is `2026-07-31`.
 
