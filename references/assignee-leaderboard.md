@@ -34,7 +34,7 @@ Ranked rows, not a heatmap — one rate and some counts, not a score moving acro
 
 - Rank by Resolved descending, tie-break on completion rate descending.
 - Rank stays a plain numeral all the way down — no marker on the leader. Bold the top row if it needs to stand out.
-- Completion rate is a bar on a 0–100 track with the value beside it — one accent fill on a plain track, never coloured by value, which would put two scales in one table. In the markdown fallback, 10 characters: `████████░░ 82%`.
+- Completion rate is a bar on a 0–100 track with the value beside it — one accent fill on a plain track, never coloured by value, which would put two scales in one grid.
 - Rank, Resolved and Open now are plain numerals. No bars.
 - Open now is bolded when non-zero, left plain at zero.
 - Actions with no assignee are not ranked — carry them in a trailing `Unassigned` row so the Total still reconciles.
