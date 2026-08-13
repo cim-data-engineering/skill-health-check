@@ -1,6 +1,6 @@
 # Equipment health snapshot
 
-Health by equipment type, over the last 3 complete months plus the current month to date — four columns.
+Health by equipment type, over the last 3 complete months include current month to today — four columns.
 
 ## Columns
 
@@ -43,11 +43,9 @@ Band heatmap: one row per equipment type, months as columns, each score cell fil
 
 ## Links
 
-Row label, over the full window:
+Row label, over the full window — the relative picker, not dates, so the dashboard lands on the same four months the grid shows:
 
-`https://ace.cimenviro.com/dashboard/equipment-health?site_ids={site_id}&start_date={window_start}T00:00:00.000&end_date={today}T00:00:00.000&equipment_type_ids={type_id}`
+`https://ace.cimenviro.com/dashboard/equipment-health?site_ids={site_id}&relative_date=last_3_months&include_today=true&equipment_type_ids={equipment_type_id}`
 
-Score cell, the same URL with `start_date` / `end_date` scoped to that month alone.
-
-The Site row uses the same URL without `equipment_type_ids`.
+The Site row uses the same URLs without `equipment_type_ids`.
 
