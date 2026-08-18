@@ -10,7 +10,7 @@ Health by equipment type, over the last 3 complete months include current month 
 | Equipment | Distinct equipment of that type carrying a scored rule |
 | Rules | Distinct scored rules on that type |
 | Four month columns | Equipment health score for that month, `x.x%` |
-| Chg | Current month minus start month, in pp |
+| Chg | Current month minus the row's earliest scored month, in pp |
 
 ## Bands
 
@@ -39,6 +39,7 @@ Band heatmap: one row per equipment type, months as columns, each score cell fil
 - Exclude equipment type `BACER` / `Bacer (System)` — platform health checks, not building plant.
 - Bold the current month column only. A grid of bold figures reads as noise.
 - Mark the current month `*` in the header and footnote it `* partial, to date`.
+- Chg anchors on the row's own earliest scored month, not on the window's first column — a site commissioned partway through the window has no score in the first column, and anchoring there blanks Chg for every row at once. `–` only where the row has a single scored month.
 - Chg is signed with a glyph and coloured by direction: `▲ +0.4` green, `▼ -0.8` red, `– 0.0` grey and muted. Colour the text, never the cell — it is a movement, not a score, so the bands do not apply. Keep it at normal weight; bold black reads heavier than the scores beside it.
 
 ## Links
