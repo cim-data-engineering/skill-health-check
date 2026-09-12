@@ -46,4 +46,4 @@ Holding across the three table checks — run hours carries its own encodings in
 - Only score cells are filled. Counts stay plain — they size the row; they are not performance.
 - Close every table with a bold rollup row. It comes from its own rollup call, so it will not equal the average of the rows above — say so once in the notes and never reconcile the two.
 - Row labels link into PEAK, the link text carrying a chevron: `AHU ›`. Truncate labels past ~28 chars with `…`.
-- Link dates are ISO `YYYY-MM-DDT00:00:00.000`, built from the same window as the grid.
+- Links come off the call the numbers came from, as its `platform_link`, narrowed to a row by appending that row's own filter. Never build a PEAK URL where a call returns one, and never reorder its parameters or touch its percent-encoding — the window and the inclusive end date it carries are the tool's to get right, not yours. Escaping `&` to `&amp;` for an HTML attribute is the one change the URL takes. Where a link comes back null, or no call returns the page at all, the reference for that check says so.

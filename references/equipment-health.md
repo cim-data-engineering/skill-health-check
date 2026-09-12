@@ -44,9 +44,11 @@ Band heatmap: one row per equipment type, months as columns, each score cell fil
 
 ## Links
 
-Row label, over the full window — the relative picker, not dates, so the dashboard lands on the same four months the grid shows:
+The section link is the `platform_link` off the `metadata_type` × `month` call — the call the grid is built from, so the dashboard opens on the same four months the reader is looking at. The site rollup call returns the identical link; either will do.
 
-`https://ace.cimenviro.com/dashboard/equipment-health?site_ids={site_id}&relative_date=last_3_months&include_today=true&equipment_type_ids={equipment_type_id}`
+Row label: that link with `&equipment_type_ids={metadata_type_id}` appended. That is what the call returns filtered to the one type, so appending costs nothing where calling per row would cost a call per row. The Site row takes the link unappended.
 
-The Site row uses the same URLs without `equipment_type_ids`.
+Pass the day after today as the exclusive `local_end_date`, so the window runs to today and the link ends there. Leaving it off rounds the bound up to the end of the month and the link lands on a window reaching weeks into the future.
+
+`platform_link` is null wherever the dashboard cannot express the call. Drop the links, say so in one line under the grid, and never substitute a URL built by hand.
 

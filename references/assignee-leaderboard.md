@@ -43,7 +43,7 @@ Ranked rows, not a heatmap — one rate and some counts, not a score moving acro
 
 ## Link
 
-On the table, not per row:
+On the table, not per row. The tickets report is the only PEAK page that groups by assignee, and no tool returns it — the ticket pages do not carry grouping, and the counts here come from GraphQL, which returns no links at all — so this one link is built:
 
 `https://ace.cimenviro.com/reports/tickets?site_ids={site_id}&grouping=assignee&relative_date=last_90_days&include_today=true`
 

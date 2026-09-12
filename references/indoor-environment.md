@@ -44,13 +44,15 @@ Band heatmap: one row per level, months as columns, each score cell filled with 
 
 `level_id` is the level's own id, carried through from the rows that gave the level its name. Never guess it, and never substitute the level number or label.
 
-Row label, over the full window — `summary_ts` is the first day of the current month, and `level_ids` scopes it to that row's level:
+The section link is the `platform_link` off the site rollup call — the same call that gives the Site row, over the same window as the grid. The `level` call carries the rows but never a link: grouping is what decides which platform route runs, and there is no level-grouped thermal comfort page, so that call comes back null every time. Take the link from the rollup and do not go looking for it on the call whose rows it labels. Filtering to a level is a different thing — the page does have that, which is what makes the append below work.
 
-`https://ace.cimenviro.com/indoor-environment/thermal-comfort?summary_site_id={site_id}&summary_ts={current_month_start}&site_ids={site_id}&start_date={window_start}T00:00:00.000&end_date={today}T00:00:00.000&level_ids={level_id}`
+Row label: that link with `&level_ids={level_id}` appended. That is what the rollup call returns filtered to the one level, so appending costs nothing where calling per row would cost a call per row. The Site row takes the link unappended.
 
-Score cell, the same URL scoped to that month alone — `summary_ts` and `start_date` its first day, `end_date` the first day of the month after. `level_ids` stays on it.
+Score cells do not link. Scoping one to its month alone is a call per cell, and the row label already lands the reader on that level.
 
-The Site row uses the same URL without `level_ids`.
+Pass the day after today as the exclusive `local_end_date`, so the window runs to today and the link ends there.
+
+`platform_link` is null wherever the page cannot express the call. Drop the links, say so in one line under the grid, and never substitute a URL built by hand.
 
 ## Notes to print
 
