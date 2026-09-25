@@ -1,96 +1,145 @@
 # Equipment run hours
 
-When plant actually runs versus when the building is occupied, over the last 7 complete local days. One deliverable: a Gantt — rows are equipment, bars span the typical ON envelope, working hours shaded behind them, so out-of-hours running is visible at a glance.
+When each unit ran across the last full week, against the site's working hours. One deliverable: a weekly HTML view, Monday to Sunday edge to edge, one row per unit, bars exact to 15 minutes, so out-of-hours running and units that never ran are obvious without reading any text.
 
-Pipeline: resolve the site → one favourites call → bulk history pull saved to disk → one script computes the stats and renders the visual.
+Pipeline: resolve the site → fix the week → discover every point on the site's plant → pick each unit's points → pull history → decide each row → render. The scripts carry every rule; the model makes the calls and passes files between them.
 
 ## Scope
 
-- **One site**: `search_sites(site_name=X, include_working_hours: true)`. Top score ≥ 0.9 → take it; otherwise show the top 3 and ask. Keep the returned `timezone` and per-day `working_hours`.
-- **Degenerate working hours** — all `00:00`, or every day disabled — ask what occupancy hours to assess against. Never guess, and never fall back to a default. Common on sites commissioned without hours.
-- **Equipment**: if the user named a scope, use it; otherwise default to central plant + AHU (`CH, CT, HWB, PCHWP, CWP, SCHW, PHWP, SHW, AHU`) and state the assumption in the output rather than asking.
-- **VAV is a hard exclusion** — point counts are enormous and box-level status is not a run-hours signal. Offer the AHU serving the zone instead. Treat FCU the same unless the user insists.
-- **Window**: the last 7 complete local days, yesterday backwards. Today is always excluded — a partial day drags average stop times earlier. Never day-sample: lead/lag plant and optimum-start AHUs make any single day wrong. Explicit user overrides are fine.
+- **One site**: `search_sites(site_name=X, include_working_hours: true)`. Top score ≥ 0.9 → take it; otherwise show the top 3 and ask.
+- **Working hours** come from the site, each day its own. A closed day has no working hours, so all its running is outside hours. All days closed or all `00:00` → the window step stops: ask what hours to assess against, never guess.
+- **Window**: the last full Monday-to-Sunday week in site local time; today's week is never shown. A user-named week is fine (`--week-of`). The window step converts local midnights to UTC, daylight saving included.
+- **Equipment**: every type in `references/run-hours-signals.md`, central plant first, then field units. VAVs, lighting, lifts and meters stay out unless the user asks (`--include LT`).
+- **First pass**: about 100 units. Central plant is always pulled whole; field-unit types follow whole, in view order, while they fit. The rest is offered after the first view, never dropped silently.
 
 ## Data recipe
 
-Compute the UTC fetch window from the site timezone — local midnight expressed in UTC. Brisbane UTC+10 → local day D is `(D-1)T14:00Z → (D)T14:00Z`; Chicago UTC-5 → `(D)T05:00Z → (D+1)T05:00Z`. Note the weekday/weekend split.
+Work in one directory, e.g. `runhours/`. Every call's response is saved to a file before a script reads it: a large response is offloaded to a file with only the path returned — graceful, not a failure — and an inline one is written out verbatim.
 
-**Status points — one call.** Look up tier-1 `metadata_id`s for the scoped type codes in `references/run-hours-status-points.md` (`1_status` rows), then:
+| Step | Do | Keeps |
+| --- | --- | --- |
+| 1 | `search_sites` as above | the response, as `runhours/site.json` |
+| 2 | `python3 scripts/runhours_plan.py window runhours/site.json runhours` | `window.json`; prints the discovery and census calls |
+| 3 | Both printed calls, in parallel, with `execute_graphql_query` | the discovery pages and the census |
+| 4 | `python3 scripts/runhours_plan.py plan runhours <discovery files> --census <census file>` | `plan.json`; prints the first-pass history calls |
+| 5 | Each printed call as `execute_graphql_query(platform.history, …, fields: ["fav_id", "ts", "data"])`, in parallel | the history files |
+| 6 | `python3 scripts/runhours_build.py runhours <history files>` | `agg.json`, `days.csv`; prints the notes |
+| 7 | `python3 scripts/render_runhours.py runhours/agg.json runhours` | the HTML, named `<site>-run-hours-<dates>.html` |
 
-`execute_graphql_query(platform.favourites, args: {site_id, metadata_ids: [...], is_active: true, limit: 200}, fields: ["fav_id", "metadata_id", "equipment.name", "equipment.metadata_type.type", {path: "history_available", args: {start, end, end_exclusive: true}}])`
+- **Discovery reads every point on in-scope plant, names included**, not a list of metadata ids. The rules in `run-hours-signals.md` sort points by name, so metadata PEAK adds later is picked up without an edit. Page it with `start_index` while `pagination.has_more`; a 1,000-point mall is one page, ~270 KB, ~6 s.
+- **The census** is the site's equipment types only, ~50 bytes a unit. It exists to name types the reference does not classify yet — otherwise a new PEAK type would vanish from the view unnoticed.
+- **History**: the plan packs ~36 points per call, ~1.6 MB. The binding limit is payload size, not the 30 s timeout: past ~2 MB the gateway hard-fails with a 5xx — halve the call's `fav_ids` and retry.
+- **Loading**: the scripts absorb every payload shape and filter to their own `fav_ids`, because the tool-results directory is shared across concurrent sessions. Never print raw rows or "sample" elements: one careless print puts the whole blob in context.
+- **Nothing to draw** — the plan prints no history calls — stop there: say no plant at the site carries a usable run point, with the plan's summary and any unclassified types. No empty view.
 
-- A type that returns nothing → retry it with its `2_enable_command` ids, then `3_analog_proxy` (analog above 5% of observed max = ON). Flag fallback rows.
-- **One favourite per physical unit**, ranked in this order: drop `history_available: false`; prefer the non-`HLI` name; then keep the `metadata_id` listed first for that type in the lookup — the plain binary status ahead of its `(MSV)` variant. All three rules are needed. A single chiller commonly returns four favourites (base and `-HLI`, each carrying plain and MSV status), and the two variants use *different* ON/OFF conventions, so leaving both in double-counts the unit and reads it under conflicting rules.
-- Scoped types that return nothing at any tier get named in the notes — otherwise the omission is silent and the reader cannot tell "no such plant here" from "present but unmonitored".
-- No equipment listing, no cache file, no scope gate — whatever this call returns is the point list. Large lists are handled by chunking the pull, not by asking.
+## Which point draws the row
 
-**Bulk pull.** `execute_graphql_query(platform.history, args: {fav_ids: [...], start, end, end_exclusive: true}, fields: ["fav_id", "ts", "data"])`. Fetch all three fields — real `ts` and `fav_id` let the script derive the grid itself, so no index math and no DST bugs. All status points × 7 days fits one call (measured against the live gateway: 43 points × 7 days ≈ 29 k rows ≈ 2 MB succeeded, in ~15 s). The binding limit is payload **size**, not the 30 s timeout. Keep each call under ~2 MB / ~25 k rows; past that the gateway hard-fails with a Cloudflare 502 — on any 5xx, halve the fav_id batch or the window and retry.
+Each unit brings up to two genuine signals — its **status** and an **analog** (speed, frequency, current, power) — picked by `run-hours-signals.md`. A command is the fallback, and only where neither exists.
 
-**Loading.** An oversized response is offloaded to a file with only the path returned; that is graceful, not a failure. Load with `load_rows` from `scripts/runhours_history.py` — it absorbs the varying payload shapes, filters to your own fav_ids and de-dups across files, all of which matter because the tool-results directory is shared across concurrent sessions. Never print raw rows or "sample" elements: one careless print puts the whole blob in context. Inspect derived files only — `wc -l`, `head`, or the module's `summarise()`.
+| The unit has | The row is drawn from |
+| --- | --- |
+| Status and analog, both changing | Whichever shows less running, over the slots both reported. The usual faults — a status stuck on, an enable mapped as status, a speed output idling above zero — all add hours, so the smaller count is the genuine one |
+| Status and analog, one held at one value all week | The one that changes. A status on all week beside a speed that follows the trading day is the textbook case |
+| Status and analog, both held | Status when they agree; hatched as no reliable data when they don't |
+| Status only | Status. On all week is kept, and named in the notes as unverified |
+| Analog only | The analog. Held at one non-zero value all week is hatched — run time is unknown |
+| Neither, but an enable or command | The command, named in the notes: it shows what the unit was told to do, not confirmed running |
+| Only a compressor status | The compressor, named in the notes: it cannot show whether the fan ran |
+| No point with history | Not drawn; named in the notes |
 
-## Compute
-
-One script, over the loaded rows:
-
-- Group by `fav_id` and local day; expect 96 rows/day on the 15-minute grid, deriving the actual cadence from `ts` deltas if it differs. Flag short days and exclude partial days from the averages.
-- ON/OFF: value set `{0,1}` → 1 is ON; `{1,2}` → 2 is ON; anything else → treat the max as ON and note the values seen.
-- Per equipment: weekday average daily run hours (Σ ÷ 5, zero-run days included), weekend average (Σ ÷ 2), average start and stop across the days the unit ran (stop = end of the last ON interval), and OOH = ON time outside working hours (all weekend ON time is OOH when weekends are unoccupied).
-- **Typical-ON envelope (`segs`).** Mark each 15-minute slot ON per the rule above; a slot is *typical-ON* if it was ON on at least 50% of the weekday days. `segs` is the list of contiguous typical-ON runs as `[start_min, end_min]`, minutes from local midnight within `[0,1440]`. This — not a naive average start→stop — is what the bar draws, and it is the one field the renderer needs that the per-day CSV cannot reconstruct, because it stays correct for across-midnight, 24/7 and cycling units.
-- Write **two artifacts**: the per-day CSV (`name,date,run_h,first_on,last_off,ooh_h`) for reuse, and the render-aggregate JSON below. The renderer consumes the aggregate, not the CSV.
-
-Follow-ups — weekend view, one-equipment drilldown, unit conversions — re-script from the file already on disk. Never re-pull the same window.
+- **ON**: a binary point is ON at 1; a multistate one (`(MSV)`, or states numbered from 1) at 2 and above; an analog above 5% of its own maximum for the week.
+- **Slots** are the site's wall clock, 15 minutes each. A gap of up to an hour holds the last reading; a longer one is hatched, never drawn as off.
+- **"Common" pair points** are left out where a member unit is drawn from a signal at least as good as the pair's own, and kept where they are the only genuine record — a pair's status beside members that carry only enables. A pair is grouped with its members.
+- **Mistyped units** — the name says one type, PEAK another, FCUs typed as AHU being the common case — are grouped by the name, and the notes say so.
 
 ## Display
 
-Run `python3 scripts/render_runhours.py <agg.json> <out.svg>`, then hand the SVG to the richest visual surface the client offers — in Claude Chat, a single `show_widget` call. Never `cat` or paste the SVG into the conversation, and don't re-invent the chart each run.
+Two pages, stacked in one file and printing one chart per sheet: **Central plant**, then **Field units**. A page with no rows is left out.
 
-Colours, fonts and layout are named constants at the top of the renderer — restyle there, not in prose.
+| Element | Encoding |
+| --- | --- |
+| Groups | One per equipment type, labelled with its PEAK type name, in the order of the types table: cooling, heating, hot water, air, water services; then packaged, terminal and extract units |
+| Rows | Every drawn unit, including one that never ran — an empty row is the signal. By level, then name in natural order (1, 2, 10), with a small gap between levels |
+| Days | Monday to Sunday edge to edge, faint midnight lines behind the bars; running through midnight is one unbroken bar |
+| Working hours | A grey column on each day, headed "Mon 14" over "9am-10pm". A closed day has no column and says "closed" |
+| Bars | Exact to 15 minutes: grey-blue during working hours, orange outside them, hatched where there is no reliable data |
+| Legend | During working hours, Outside working hours, and No reliable data only when a page uses it |
+| Labels | Indented under the group, cut with "…" when too long, a "›" after each; hovering gives the full name and the point used |
+| Hover | "On Mon 14 07:00 to Tue 15 01:15", "Running all week", "Did not run this week", or why the data is not reliable |
 
-The encodings, for a hand-rolled variant that should stay in the family: horizontal Gantt, one row per equipment, grouped by type. Fixed 00:00→24:00 axis at identical scale on every row. Working-hours band shaded behind each group's rows. Each seg split at the band edges — the portion inside in the in-hours colour, the portions outside in the out-of-hours colour — so a 24/7 unit renders out/in/out and cycling units render their envelope. Right-hand annotation per row. `ran: false` keeps its row, drawn without a bar. Legend below the last group.
+No totals, no hour ticks, no part-hour shading, and never an em or en dash in the page. Colours, fonts and layout are named constants at the top of the renderer — restyle there, not in prose.
 
-Close with one-line anomaly flags only: zero runtime, weekend OOH, pre-dawn starts, run-on past close, heavy cycling. No essay, no table, no workbook.
+Hand over the HTML file every time, and render the same view inline where the client can — in Claude Chat, one `show_widget` call with the file's contents, ~25 KB for a hundred units. Never paste the HTML into the conversation as text. Under it, the notes, then the offer of the later pass if there is one.
+
+## Links
+
+Each unit name opens its PEAK chart for the same week, with working hours on. No tool returns the chart page, so this link is built, by the build step:
+
+`{host}/charts?split=false&splitbyunit=false&splitbyequip=false&start={UTC start}.000&end={UTC end}.000&workinghours=true&fav-{equipment_id}={fav_ids}`
+
+- `host` comes off the site's `site_link`; start and end are local midnight on the Monday and the following Monday, in UTC.
+- `fav_ids` lists the point drawn first, then the point it was checked against, so the chart shows why the row reads as it does.
 
 ## Notes to print
 
-- No deep link — PEAK has no equipment run-hours view. The per-day CSV on disk is the drill-down surface.
-- The working hours assessed against, and whether they came from the site or from the user.
-- Scoped equipment types that returned no points at any tier.
-- Equipment whose signal came from a fallback tier (enable command or analog proxy) rather than a status point.
-- Partial or short days excluded from the averages, and any unexpected value set seen on a point.
+The build step prints them, in this order; state them under the view.
+
+- The working hours assessed against, and whether they came from the site or the user.
+- How many rows came from each kind of signal, and every unit whose status and analog disagreed.
+- Units on all week from a status with nothing to check it against — possibly a stuck switch.
+- Units drawn from a command or a compressor status, and why each is weaker.
+- Hatched rows and data gaps.
+- Mistyped units regrouped, Common pairs left out, and units with no usable point or no history.
+- Equipment types the reference does not cover yet.
+- The later pass not yet fetched, by type and unit count. Offer it in one line: on yes, `python3 scripts/runhours_plan.py calls runhours` prints its calls; pull them, re-run the build with `--pass 2` and every history file, and render again.
+
+Follow-ups — a single unit, a weekday or weekend view, run-hour totals — re-script from `days.csv` and the files on disk. Never re-pull the same window.
 
 ## Tool sequence
 
 ```
-search_sites             (include_working_hours: true)
-execute_graphql_query    (platform.favourites — one call, with history_available)
-execute_graphql_query    (platform.history — bulk to disk, chunked under ~2 MB)
-<script>                 (load_rows → stats → per-day CSV + aggregate JSON)
-render_runhours.py       (aggregate JSON → standalone SVG)
-show_widget              (the visual, once)
+search_sites              (include_working_hours: true) → runhours/site.json
+runhours_plan.py window   → window.json, the two discovery calls
+execute_graphql_query     (platform.favourites, paged, and platform.equipment, in parallel)
+runhours_plan.py plan     → plan.json, the first-pass history calls
+execute_graphql_query     (platform.history, one per printed call, in parallel)
+runhours_build.py         → agg.json, days.csv, the notes
+render_runhours.py        → the HTML file
+show_widget               (the same file inline, once)
 ```
 
 ## Aggregate schema
 
-`scripts/render_runhours.py` is the only consumer. A hand-rolled fallback should target the same shape.
+`scripts/render_runhours.py` is the only consumer. A hand-rolled view should target the same shape. Slots are 15-minute steps from Monday 00:00 local, 0 to 672, as `[start, end)`.
 
 ```json
 {
   "site_name": "str",
-  "window_label": "str",           // e.g. "10-16 Aug 2026"
-  "wh_start_min": 480,             // weekday working-hours band start, minutes from local midnight
-  "wh_end_min": 1080,              // band end
-  "type_order": ["Chiller", "Air Handling Units"],
-  "equipment": [
+  "window_label": "str",           // "Mon 14 to Sun 20 Sep 2026"
+  "tz_label": "str",               // "BST"
+  "days": [{"label": "Mon 14", "wh": [36, 88]}],   // wh: working-hours slots that day, or null when closed
+  "pages": [
     {
-      "name": "str", "type": "str",
-      "wd_run": 0.0,               // avg weekday daily run hours
-      "we_run": 0.0,               // avg weekend daily run hours
-      "wd_ooh": 0.0,               // avg weekday daily out-of-hours run hours
-      "segs": [[0, 1440]],         // typical-ON envelope, minutes from midnight
-      "lbl": "str",                // "HH:MM-HH:MM", or "no runtime this week"
-      "ran": true
+      "title": "Central plant",
+      "groups": [
+        {
+          "name": "Chiller",
+          "rows": [
+            {
+              "name": "str",
+              "href": "str",               // the PEAK chart link
+              "runs": [[28, 100]],         // ON ranges across the week; may cross midnight
+              "gaps": [[300, 310]],        // no data for over an hour: hatched
+              "nodata": null,              // or why the whole row is hatched
+              "level_break": false,        // small gap above: first unit of a new level
+              "point": "str"               // the point the row was drawn from
+            }
+          ]
+        }
+      ]
     }
-  ]
+  ],
+  "footer": "str",
+  "notes": ["str"]
 }
 ```
