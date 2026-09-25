@@ -50,7 +50,6 @@ In-scope types, in the order the view draws them and the first pass fetches them
 | Field units | Packaged | CRAC | Computer Room Air Conditioning Unit | CRAC | | | |
 | Field units | Packaged | ACC | Air Cooled Condensers | ACC | | | |
 | Field units | Terminal | FCU | Fan Coil Units | FCU | | | Heat Pump, Heat Recovery |
-| Field units | Terminal | ACB | Active Chilled Beams | ACB | | | |
 | Field units | Terminal | UH | Unit Heater | UH | | | |
 | Field units | Terminal | ACRTN | Air Curtain | | | | |
 | Field units | Extract | KF | Kitchen Fans | KEF, KSAF | | | |
@@ -87,7 +86,7 @@ A unit whose name says one type while PEAK says another is drawn under its name'
 
 | Codes | Why |
 | --- | --- |
-| VAV, UFAD | Box- and floor-level terminals are not a run-hours signal, and a site has hundreds; the AHU serving them is charted instead |
+| VAV, UFAD, ACB | Box- and floor-level terminals and chilled beams are not a run-hours signal, and a site has hundreds: none has a fan or compressor of its own, so the AHU serving them is charted instead |
 | LT, ELVTR, ELVTR-GRP, VT | Lighting and lifts — only when the user asks |
 | PSM, SYS-PM, GM, SYS-GM, WM, SYS-WM, TEM, SM, CAM | Meters — only when the user asks |
 | VSD | A drive is read through the equipment it drives, where its speed is a signal like any other |
@@ -147,6 +146,17 @@ When a unit has several points in one role, the one naming its main moving part 
 | 8 | Condenser Fan, Condenser Water Fan, Condenser Status, Condenser Pump | PAC Condenser Fan Status |
 
 Two endings rank last whatever they name: **Occupancy**, a schedule rather than an instruction to this unit, comes after any enable or command; **Load** and **Output**, indirect measures, come after any speed, current or power. A point that only an **Except where** lets through ranks last in its role too: a boiler's `Burner Status` draws the row only where no boiler status is mapped beside it. Within a rank: the ending's place in **Roles**, then the plain point before its `(MSV)` twin, then the shorter name.
+
+## Runs around the clock
+
+A unit drawn on all week, with no second signal that changes to check it against, is named in the notes as possibly a stuck switch — unless it serves a space conditioned day and night for what is in it, where running all week is its job. Those are listed on a line of their own. Words match whole, in any case, in the unit's name or its zone's.
+
+| Codes | Name or zone contains | Why |
+| --- | --- | --- |
+| CRAC | | A computer room unit cools IT equipment, which never stops |
+| | Comms, Communication, Communications, Server, Data Room, Data Hall, Data Centre, Data Center, MDF | A unit named for a comms or server room, or zoned in one, conditions it continuously |
+
+`Comms` matches only as a whole word, never inside `Common`. `MER` is left out: it is as often a mechanical equipment room, a plantroom, as a telecoms one.
 
 ## What the rules pick
 

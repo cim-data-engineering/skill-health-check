@@ -3,18 +3,23 @@
 
 Usage:
     python3 runhours_plan.py window <site.json> <workdir> [--week-of YYYY-MM-DD] [--include LT,...]
+                                    [--hours "Mon-Fri 08:00-18:00, Sat 09:00-13:00"]
     python3 runhours_plan.py plan <workdir> <discovery.json> [more.json ...] [--census census.json ...] [--cap N]
     python3 runhours_plan.py calls <workdir> [--pass 2]
+    python3 runhours_plan.py last <workdir> <last-reading.json>
 
 window  Reads the saved search_sites result (timezone and working hours), fixes
         the last full Monday-to-Sunday week in site local time, writes
         <workdir>/window.json and prints the discovery and census calls to make.
+        --hours assesses against the user's hours instead of the site's.
 plan    Sorts every discovered point with the rules in
         references/run-hours-signals.md, picks each unit's candidate points,
-        orders the units for the view, splits them into a first pass of about
+        orders the units for the view, splits them into a first pass of up to
         --cap units and the rest, writes <workdir>/plan.json and prints the
         history calls to make.
 calls   Prints the history calls for the later pass, once the user asks for it.
+last    Reads the latest-reading call the plan prints when nothing logged all
+        week, and says when the site last reported, in site local time.
 
 The rules are the reference's tables, parsed at run time — change a rule there,
 not here. Standard library only — no third-party dependencies, by design, so
@@ -28,6 +33,7 @@ from collections import Counter
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
+sys.dont_write_bytecode = True             # leave no __pycache__ beside the skill
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from runhours_history import read_page, read_results  # noqa: E402
 
@@ -37,7 +43,9 @@ SIGNALS = Path(__file__).resolve().parent.parent / "references" / "run-hours-sig
 CAP_UNITS       = 100    # first-pass size; central plant is always fetched whole
 POINTS_PER_CALL = 36     # ~672 rows per point-week keeps a call under ~25k rows / ~2 MB
 DISCOVERY_LIMIT = 1000   # units per discovery page: ~170 KB for a 100-unit office tower
-PROBE_POINTS    = 5      # points asked for their last reading when nothing logged all week
+PROBE_POINTS    = 20     # points asked for the latest reading when nothing logged all week,
+                         # a type at a time; the call returns one row, the newest of them all
+HISTORY_FIELDS  = ["fav_id", "ts", "data"]
 DEFAULT_HOST    = "https://ace.cimenviro.com"
 PAGE_ORDER      = ["Central plant", "Field units", "Other"]
 ROLE_ORDER      = ["status", "analog", "command", "compressor"]
@@ -108,11 +116,16 @@ def natural(text):
             for t in re.split(r"(\d+)", text) if t]
 
 
+def plural(n, word):
+    """'1 unit', '2 units'; 'history call' becomes 'history calls'."""
+    return f"{n} {word}" + ("" if n == 1 else "s")
+
+
 class Rules:
     """The tables of references/run-hours-signals.md, ready to classify with."""
 
     NEEDED = ("Equipment types", "Regrouped by name", "Never charted", "Roles",
-              "Never a run signal", "Which point wins")
+              "Never a run signal", "Which point wins", "Runs around the clock")
 
     def __init__(self, path=SIGNALS):
         tables = read_tables(path)
@@ -149,6 +162,9 @@ class Rules:
                            for p in _split(row["Component named"]) if not p.startswith("(")]
         self.by_word = {w: code for code, ty in self.types.items() for w in ty["words"]}
         self.compressor = _phrase("compressor")
+        clock = tables["Runs around the clock"]
+        self.clock_codes = {c for row in clock for c in _split(row["Codes"])}
+        self.clock_words = [_phrase(p) for row in clock for p in _split(row["Name or zone contains"])]
 
     def classify(self, name, type_code):
         """(role, rank key, speed state?) for a point name on this type, or None if no run signal."""
@@ -193,6 +209,13 @@ class Rules:
     def is_plant(self, point_names):
         """Whether any point reports a plant alarm or filter — plant whose running is not mapped."""
         return any(rx.search(normalise(n)[0]) for n in point_names for rx in self.marks_plant)
+
+    def runs_around_the_clock(self, unit):
+        """Whether the unit serves a space conditioned day and night, so running all week is its job."""
+        if {unit["peak_type"], unit["type"]} & self.clock_codes:
+            return True
+        text = " ".join((unit.get(k) or "").lower() for k in ("name", "zone"))
+        return any(rx.search(text) for rx in self.clock_words)
 
     def charted_type(self, equipment_name, peak_type):
         """The type a unit is drawn under: its name's, where Regrouped by name allows the pair.
@@ -246,6 +269,39 @@ def working_slots(hours):
     return days
 
 
+HOURS_GROUP = re.compile(r"(?P<days>[a-z]+(?:\s*-\s*[a-z]+)?)\s+(?P<start>\d{1,2}:\d{2})\s*-\s*(?P<end>\d{1,2}:\d{2})")
+
+
+def parse_hours(spec):
+    """working_hours in the site record's own keys from 'Mon-Fri 08:00-18:00, Sat 09:00-13:00'.
+
+    Groups are separated by commas or semicolons; a day range may wrap
+    (Fri-Mon); an end of 00:00 or 24:00 is midnight. A day not named is closed.
+    """
+    def day(word):
+        hit = [i for i, key in enumerate(DAY_KEYS) if len(word) >= 3 and key.startswith(word)]
+        if not hit:
+            raise ValueError(f"--hours: '{word}' is not a day (Mon, Tue, ... Sun)")
+        return hit[0]
+
+    hours = {f"{key}{part}": value for key in DAY_KEYS
+             for part, value in (("Enabled", False), ("Start", "00:00"), ("End", "00:00"))}
+    for group in (g.strip().lower() for g in re.split(r"[,;]", spec or "") if g.strip()):
+        m = HOURS_GROUP.fullmatch(group)
+        if not m:
+            raise ValueError(f"--hours: cannot read '{group}'; write e.g. \"Mon-Fri 08:00-18:00, Sat 09:00-13:00\"")
+        ends = [day(w.strip()) for w in m["days"].split("-")]
+        first, last = ends[0], ends[-1]
+        for i in range((last - first) % 7 + 1):
+            key = DAY_KEYS[(first + i) % 7]
+            hours.update({f"{key}Enabled": True, f"{key}Start": m["start"], f"{key}End": m["end"]})
+    for key in DAY_KEYS:
+        start, end = _slot(hours[f"{key}Start"]), _slot(hours[f"{key}End"])
+        if hours[f"{key}Enabled"] and end and end <= start:
+            raise ValueError(f"--hours: {key} ends at or before it starts")
+    return hours
+
+
 def week_label(days):
     first, last = days[0], days[-1]
     head = f"Mon {first.day}"
@@ -275,11 +331,14 @@ def cmd_window(args):
         return datetime.combine(d, time(0), tzinfo=tz).astimezone(timezone.utc)
 
     start, end = utc(monday), utc(monday + timedelta(days=7))
+    hours_source = site.get("hours_source", "site")
+    if args.hours:
+        site["working_hours"], hours_source = parse_hours(args.hours), "user"
     slots = working_slots(site.get("working_hours") or {})
     if not any(slots):
-        sys.exit("working hours are empty (every day closed or 00:00). Ask the user what hours "
-                 "to assess against, write them into site.json's working_hours in the same keys, "
-                 'add "hours_source": "user", and run window again.')
+        sys.exit("working hours are empty (every day closed or 00:00). Ask the user what hours to "
+                 'assess against and run window again with them, e.g. --hours "Mon-Fri 08:00-18:00, '
+                 'Sat 09:00-13:00"; a day not named is closed.')
 
     names = sorted({datetime.combine(d, time(12), tzinfo=tz).tzname() for d in dates})
     link = re.match(r"https?://[^/]+", site.get("site_link") or "")
@@ -287,7 +346,7 @@ def cmd_window(args):
     window = {
         "site_id": site["site_id"], "site_name": site["site_name"],
         "timezone": site["timezone"], "tz_label": "/".join(names),
-        "hours_source": site.get("hours_source", "site"),
+        "hours_source": hours_source,
         "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"), "end": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "link_start": start.strftime("%Y-%m-%dT%H:%M:%S.000"),
         "link_end": end.strftime("%Y-%m-%dT%H:%M:%S.000"),
@@ -323,12 +382,15 @@ def cmd_window(args):
               for extra in ({}, {"metadata_type_codes": known})]
     print(f"{site['site_name']}: {window['label']} ({window['tz_label']}), "
           f"{window['start']} to {window['end']} UTC. Wrote {work / 'window.json'}.")
-    print(f"Discovery, one call per {DISCOVERY_LIMIT} units. When pagination.total is over "
-          f"{DISCOVERY_LIMIT}, fetch the other pages in parallel with start_index "
-          f"{DISCOVERY_LIMIT}, {2 * DISCOVERY_LIMIT}, ...:")
+    print("Three calls, in parallel, each exactly as printed. Save the responses in "
+          f"{work} under the names given.")
+    print(f"Discovery -> discovery-0.json. Where its pagination.total is over {DISCOVERY_LIMIT}, "
+          f"make the same call again for each further page, in parallel, with start_index "
+          f"{DISCOVERY_LIMIT}, {2 * DISCOVERY_LIMIT}, ... -> discovery-{DISCOVERY_LIMIT}.json, "
+          f"discovery-{2 * DISCOVERY_LIMIT}.json, ...:")
     print(json.dumps(discovery))
-    print("Census, two counts in parallel with the discovery (save both responses):")
-    for call in census:
+    for name, call in zip(("census-all.json", "census-known.json"), census):
+        print(f"Census count -> {name}:")
         print(json.dumps(call))
 
 
@@ -465,7 +527,8 @@ def pick_points(unit, rules):
     sensors = [c for r in SENSOR_ROLES for c in found[r]]
     if sensors:
         unit["why"] = "no history this week"
-        unit["probe"] = min(sensors, key=lambda c: (c["key"], c["fav_id"]))["fav_id"]
+        best = min(sensors, key=lambda c: (c["key"], c["fav_id"]))
+        unit["probe"] = {"fav_id": best["fav_id"], "unit": unit["name"], "point": best["name"]}
     elif not unit["points"]:
         unit["why"] = "no points"
     elif "COMMON" in name_tokens(unit["name"]):
@@ -532,6 +595,7 @@ def cmd_plan(args):
         unit["page"] = ty["page"] if ty else "Other"
         if unit["type"] != peak:
             unit["regrouped_from"] = rules.types[peak]["name"]
+        unit["around_the_clock"] = rules.runs_around_the_clock(unit)
         pick_points(unit, rules)
         units.append(unit)
     drop_covered_pairs(units)
@@ -555,21 +619,35 @@ def cmd_plan(args):
     dead = [u for u in units if u.get("why") == "no history this week"]
     plan = {
         "units": [{k: u.get(k) for k in ("equipment_id", "name", "type", "type_name", "page",
-                                          "level", "zone", "regrouped_from", "pass", "pull", "why")}
+                                          "level", "zone", "regrouped_from", "around_the_clock",
+                                          "pass", "pull", "why")}
                   for u in units],
         "chunks": chunks,
         "unclassified": [{"code": c, "type": census_names.get(c, c), "units": n}
                          for c, n in unclassified.most_common()],
         "unknown_units": unknown_units or 0,
         "outage": bool(dead) and not any(u["pull"] for u in units),
+        "probe": probe_points(dead) if dead and not chunks else [],
     }
     (work / "plan.json").write_text(json.dumps(plan, indent=1))
     print(f"{window['site_name']}: {window['label']}. Wrote {work / 'plan.json'}.")
     print_summary(plan)
     if not chunks:
-        print_nothing_to_draw(window, plan, dead)
+        print_nothing_to_draw(window, plan, dead, work)
         return
-    print_calls(window, plan, 1)
+    print_calls(window, plan, 1, work)
+
+
+def probe_points(dead):
+    """Up to PROBE_POINTS of the units' best points, taken a type at a time so every type is asked."""
+    by_type = {}
+    for u in dead:
+        by_type.setdefault(u["type"], []).append(u["probe"])
+    out, queues = [], list(by_type.values())
+    while queues and len(out) < PROBE_POINTS:
+        out += [q.pop(0) for q in queues][:PROBE_POINTS - len(out)]
+        queues = [q for q in queues if q]
+    return out
 
 
 WHY_TEXT = {"no history this week": "a run point, but no history this week",
@@ -584,54 +662,87 @@ WHY_TEXT = {"no history this week": "a run point, but no history this week",
 def print_summary(plan):
     for pass_no, label in ((1, "First pass"), (2, "Later pass")):
         drawn = [u for u in plan["units"] if u["pull"] and u["pass"] == pass_no]
-        if not drawn and pass_no == 2:
+        if not drawn:
             continue
         types = Counter(u["type_name"] for u in drawn)
         calls = sum(1 for c in plan["chunks"] if c["pass"] == pass_no)
         points = sum(len(u["pull"]) for u in drawn)
         detail = (": " + ", ".join(f"{t} {n}" for t, n in types.items())) if pass_no == 2 else ""
-        print(f"{label}: {len(drawn)} units in {len(types)} types, {points} points, "
-              f"{calls} history calls{detail}.")
+        print(f"{label}: {plural(len(drawn), 'unit')} in {plural(len(types), 'type')}, "
+              f"{plural(points, 'point')}, {plural(calls, 'history call')}{detail}.")
     for why, n in Counter(u["why"] for u in plan["units"] if not u["pull"]).items():
-        print(f"Not drawn: {n} units, {WHY_TEXT.get(why, why)}.")
+        print(f"Not drawn: {plural(n, 'unit')}, {WHY_TEXT.get(why, why)}.")
     regrouped = Counter(f"{u['regrouped_from']} as {u['type_name']}"
-                        for u in plan["units"] if u["regrouped_from"])
+                        for u in plan["units"] if u["regrouped_from"] and u["pull"])
     if regrouped:
         print("Regrouped by name: " + ", ".join(f"{k} {n}" for k, n in regrouped.items()) + ".")
     if plan["unclassified"]:
         print("Unclassified types at this site: "
               + ", ".join(f"{u['type']} ({u['code']}) {u['units']}" for u in plan["unclassified"]))
     if plan["unknown_units"]:
-        print(f"Unclassified: {plan['unknown_units']} units are of a type neither table in "
+        print(f"Unclassified: {plural(plan['unknown_units'], 'unit')} of a type neither table in "
               "run-hours-signals.md covers.")
 
 
-def print_nothing_to_draw(window, plan, dead):
+def history_call(args):
+    return {"query_name": "platform.history", "args": args, "fields": HISTORY_FIELDS}
+
+
+def print_nothing_to_draw(window, plan, dead, work):
     if plan["outage"]:
-        probe = [u["probe"] for u in dead][:PROBE_POINTS]
-        print(f"Nothing to draw: none of the {len(dead)} units with a run point logged any history "
-              f"from {window['start']} to {window['end']}, so the site's data feed looks down. Say so "
-              "rather than showing an empty view. To say since when, ask for the last reading "
-              "(platform.history, fields fav_id, ts):")
-        print(json.dumps({"fav_ids": probe, "latest": True}))
+        print(f"Nothing to draw: none of the {plural(len(dead), 'unit')} with a run point logged any "
+              f"history from {window['start']} to {window['end']}, so the site's data feed looks down. "
+              "Say so rather than showing an empty view. To say since when, make this call exactly as "
+              f"printed: it returns one row, the newest reading of any of these "
+              f"{plural(len(plan['probe']), 'point')}. Save it as {work / 'last-reading.json'}, then run "
+              f"runhours_plan.py last {work} {work / 'last-reading.json'}")
+        print(json.dumps(history_call({"fav_ids": [p["fav_id"] for p in plan["probe"]], "latest": True})))
     else:
         print("Nothing to draw: no plant at the site carries a usable run point. Say so with the "
               "summary above rather than showing an empty view.")
 
 
-def print_calls(window, plan, pass_no):
+def print_calls(window, plan, pass_no, work):
     chunks = [c for c in plan["chunks"] if c["pass"] == pass_no]
     label = "first pass" if pass_no == 1 else "later pass"
-    print(f"History calls, {label} (platform.history, fields fav_id, ts, data): {len(chunks)}")
+    if not chunks:
+        print(f"No history calls for the {label}: every unit with a run point is in the other pass.")
+        return
+    names = f"history-{pass_no}-1.json" + (f" to history-{pass_no}-{len(chunks)}.json" if len(chunks) > 1 else "")
+    print(f"History calls, {label}: {len(chunks)}. Make each exactly as printed, in parallel, and save "
+          f"the responses in {work} as {names}, in the order printed:")
     for chunk in chunks:
-        print(json.dumps({"fav_ids": chunk["fav_ids"], "start": window["start"],
-                          "end": window["end"], "end_exclusive": True}))
+        print(json.dumps(history_call({"fav_ids": chunk["fav_ids"], "start": window["start"],
+                                       "end": window["end"], "end_exclusive": True})))
 
 
 def cmd_calls(args):
     work = Path(args.workdir)
     window = json.loads((work / "window.json").read_text())
-    print_calls(window, json.loads((work / "plan.json").read_text()), args.pass_no)
+    print_calls(window, json.loads((work / "plan.json").read_text()), args.pass_no, work)
+
+
+def cmd_last(args):
+    """When the site last reported: the newest reading of the points the plan probed."""
+    from zoneinfo import ZoneInfo           # stdlib from 3.9; needs the system tz database
+    work = Path(args.workdir)
+    window = json.loads((work / "window.json").read_text())
+    probe = {str(p["fav_id"]): p for p in json.loads((work / "plan.json").read_text()).get("probe") or []}
+    if not probe:
+        raise ValueError("plan.json has no probe: the last step follows a plan with nothing to draw")
+    rows = [r for r in read_results(args.response) if str(r.get("fav_id")) in probe and r.get("ts")]
+    if not rows:
+        print(f"None of the {plural(len(probe), 'point')} asked has a reading in PEAK's history at all: "
+              "the site's points have never reported, or their history is not reaching PEAK. Say so.")
+        return
+    newest = max(rows, key=lambda r: datetime.fromisoformat(str(r["ts"]).replace("Z", "+00:00")))
+    local = datetime.fromisoformat(str(newest["ts"]).replace("Z", "+00:00")).astimezone(
+        ZoneInfo(window["timezone"]))
+    p = probe[str(newest["fav_id"])]
+    print(f"The site's run points last reported {local:%a} {local.day} {local:%b %Y %H:%M} {local.tzname()}, "
+          f"the newest reading of the {plural(len(probe), 'point')} sampled across its types "
+          f"({p['unit']}, {p['point']}). Say its data feed has been down since then, and that there is "
+          f"no run-hours view for {window['label']}.")
 
 
 def main(argv):
@@ -642,6 +753,8 @@ def main(argv):
     w.add_argument("workdir")
     w.add_argument("--week-of", help="any date in the Monday-to-Sunday week to show")
     w.add_argument("--include", help="never-charted type codes the user asked for, e.g. LT")
+    w.add_argument("--hours", help='the user\'s working hours, e.g. "Mon-Fri 08:00-18:00, Sat 09:00-13:00"; '
+                                   "a day not named is closed")
     w.add_argument("--today", help=argparse.SUPPRESS)
     p = sub.add_parser("plan", help="pick points and passes from the discovery pages")
     p.add_argument("workdir")
@@ -653,9 +766,12 @@ def main(argv):
     c = sub.add_parser("calls", help="print the history calls for one pass of an existing plan")
     c.add_argument("workdir")
     c.add_argument("--pass", dest="pass_no", type=int, default=2)
+    last = sub.add_parser("last", help="say when the site last reported, from the saved latest-reading call")
+    last.add_argument("workdir")
+    last.add_argument("response", help="saved response of the latest-reading call")
     args = parser.parse_args(argv[1:])
     try:
-        {"window": cmd_window, "plan": cmd_plan, "calls": cmd_calls}[args.command](args)
+        {"window": cmd_window, "plan": cmd_plan, "calls": cmd_calls, "last": cmd_last}[args.command](args)
     except (ValueError, KeyError) as exc:
         sys.exit(f"runhours_plan: {exc}")
 

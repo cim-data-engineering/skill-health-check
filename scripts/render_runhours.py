@@ -10,7 +10,7 @@ one chart per sheet. Given a directory, the file is named
 `<site>-run-hours-<dates>.html`.
 
 The page carries the aggregate as compact data plus a short drawing script, so
-it stays small enough — about 30 KB for a hundred units — to hand to an inline
+it stays small enough — about 35 KB for a hundred units — to hand to an inline
 view as well as to save; a pre-drawn SVG of the same week is several times
 larger. The data is checked here before it is written, so a malformed field
 fails in Python rather than as a blank page.
