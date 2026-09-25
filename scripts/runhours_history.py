@@ -30,18 +30,21 @@ runs wherever the skill is unpacked.
 import json
 import sys
 
-__all__ = ["load_rows", "read_results", "summarise"]
+__all__ = ["load_rows", "read_page", "read_results", "summarise"]
 
 
 def _unwrap(obj):
-    """Reduce any of the known payload shapes to a list of row dicts."""
+    """Reduce any of the known payload shapes to (row dicts, pagination total or None)."""
+    total = None
     for _ in range(4):                      # bounded: shapes nest at most twice
         if isinstance(obj, list):
             if obj and isinstance(obj[0], dict) and "text" in obj[0]:
                 obj = json.loads(obj[0]["text"])     # MCP text-block wrapper
                 continue
-            return obj                                # bare list of rows
+            return obj, total                         # bare list of rows
         if isinstance(obj, dict):
+            if total is None and isinstance(obj.get("pagination"), dict):
+                total = obj["pagination"].get("total")
             if "results" in obj:
                 obj = obj["results"]                  # bare {"results": [...]}
                 continue
@@ -50,16 +53,18 @@ def _unwrap(obj):
                 continue
         break
     if isinstance(obj, list):
-        return obj
+        return obj, total
     raise ValueError(f"unrecognised history payload shape: {type(obj).__name__}")
 
 
-def read_results(path):
-    """Return the result rows of one saved response, whatever its wrapper.
+def read_page(path):
+    """Return (rows, total) for one saved response, whatever its wrapper.
 
-    Raises on a file that cannot be read or parsed rather than returning
-    nothing — a silently empty page would drop equipment or understate run
-    hours, which is worse than failing loudly.
+    `total` is the response's `pagination.total` where the MCP reported one —
+    a `limit: 1` call is a count — and None otherwise. Raises on a file that
+    cannot be read or parsed rather than returning nothing: a silently empty
+    page would drop equipment or understate run hours, which is worse than
+    failing loudly.
     """
     try:
         with open(path) as fh:
@@ -67,6 +72,11 @@ def read_results(path):
     except (OSError, ValueError) as exc:
         raise ValueError(f"could not read response file {path}: {exc}") from exc
     return _unwrap(payload)
+
+
+def read_results(path):
+    """Return the result rows of one saved response, whatever its wrapper."""
+    return read_page(path)[0]
 
 
 def load_rows(paths, fav_ids):
