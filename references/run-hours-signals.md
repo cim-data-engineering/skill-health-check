@@ -57,20 +57,20 @@ In-scope types, in the order the view draws them and the first pass fetches them
 | Field units | Extract | EAF | Exhaust Air Fans | EAF, EF | | | |
 
 - **Page** follows what the type serves: the whole building or a large area is central plant, one space or tenancy is a field unit. A type that could go either way — a heat pump feeding a plant loop — is placed by what it usually serves; move its row if a portfolio differs.
-- **Name word** is a word in an equipment name that means this type, anywhere in the name and glued to its number or not — `HB FCU F210-1`, `B_KEF11-1`, `Common - SHWP - 2`. It is read only to group a unit with the type its name says, and only between the types **Regrouped by name** allows.
+- **Name word** is a word in an equipment name that means this type, anywhere in the name and glued to its number or not — `B2 FCU 210-1`, `KEF11-1`, `Common - SHWP - 2`. It is read only to group a unit with the type its name says, and only between the types **Regrouped by name** allows.
 - **Compressor is the unit** is `yes` where the compressor running is the unit running, so a compressor status counts as a status. Elsewhere it is a last resort: a PAC's compressor cycles while its fan runs on.
 - **Heating is the unit** is `yes` where heating is what the unit is for, so the heating words that **Never a run signal** sets aside on a fan — a burner, an immersion heater, a heating status — are this unit's own: a boiler with only `Burner Status` is drawn from it.
 - **Also never** adds words that disqualify a point on this type only, on top of **Never a run signal** — an AHU's heat-pump or heat-recovery status is not its fan.
 
-A type in neither this table nor **Never charted** is unclassified: its units are left off the chart and counted in the notes, so a new PEAK type shows up as a gap to fill here rather than as plant quietly missing. Between them the two tables cover every type in PEAK's catalogue as of September 2026 (97).
+A type in neither this table nor **Never charted** is unclassified: its units are left off the chart and counted in the notes, so a new PEAK type shows up as a gap to fill here rather than as plant quietly missing. Between them the two tables list every type in PEAK's catalogue; add a row when PEAK adds one.
 
 ## Regrouped by name
 
-A unit whose name says one type while PEAK says another is drawn under its name's type only where that pair is here — the mix-ups that recur across portfolios. A name that also names PEAK's own type keeps it. Every other disagreement is left as PEAK has it: the first word of a name is as often a building or plantroom code (`CH AHU-12 Kitchen`, `EC Boiler-01` for an energy centre) or a heating circuit (`CT Heating Pump 2A`, constant temperature) as a type, and a pump named for what it serves (`AHU-CHWP-10`) is still a pump.
+A unit whose name says one type while PEAK says another is drawn under its name's type only where that pair is here — the mix-ups that recur across portfolios. A name that also names PEAK's own type keeps it. Every other disagreement is left as PEAK has it: the first word of a name is as often a building or plantroom code (`CH AHU-12`, `EC Boiler-01` for an energy centre) or a heating circuit (`CT Heating Pump 2`, constant temperature) as a type, and a pump named for what it serves (`AHU-CHWP-10`) is still a pump.
 
 | Code | Takes units PEAK types as | Seen as |
 | --- | --- | --- |
-| FCU | AHU, PAC | `FCU-B01`, `HB FCU F210-1` typed AHU; `FCU-00-01` typed PAC |
+| FCU | AHU, PAC | `FCU-1-01`, `B2 FCU 210-1` typed AHU; `FCU-3-02` typed PAC |
 | AHU | PAC, FCU | `AHU-01` typed PAC |
 | PAC | AHU, FCU | `PAC-1` typed AHU |
 | CRAC | AHU, PAC, FCU | `CRAC-1` typed PAC |
@@ -106,7 +106,7 @@ Each point takes at most one role, from how its name ends. The recipe compares a
 | command | Command, Enable, Occupancy | What the unit was told to do; never draws a row |
 
 - The longest ending that matches decides — `Speed Command` ranks after `RPM`, not with `Speed`. Brackets and a trailing unit are ignored: `Speed (Hz)` is `Speed`, `Load %` is `Load`.
-- A name marked `(MSV)` is a state, not a measure, so an `(MSV)` speed stands in as the unit's status (off, low, high). A speed state held at one running state all week shows the speed the unit is set to, not when it ran, and its row is hatched: at Diageo 1HQ, 180 fan coils hold `Fan Speed (MSV)` at 3 or 4 all week while their `Supply Air Fan Enable` switches with the day. A plain point beats its `(MSV)` twin.
+- A name marked `(MSV)` is a state, not a measure, so an `(MSV)` speed stands in as the unit's status (off, low, high). A speed state held at one running state all week shows the speed the unit is set to, not when it ran, and its row is hatched: a fan coil's `Fan Speed (MSV)` can sit at 3 all week while its enable switches with the day. A plain point beats its `(MSV)` twin.
 - The state numbering is read from the week: a speed state that reports 0 counts from 0, so 0 is off and 1 is the lowest speed; one that never reports 0 counts from 1, the BACnet convention, so 1 is off.
 - **Load** and **Output** count only when the name names no component — `Chiller Load`, `Hot Water Boiler Load`. A coil's or a system's load can read zero while the fan runs, and the least-run-time comparison would then pick it.
 - A status that names a compressor becomes the **compressor** role unless the type says **Compressor is the unit**; on those other types an analog or command naming a compressor is skipped.

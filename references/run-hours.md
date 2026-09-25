@@ -27,11 +27,11 @@ Work in one directory, e.g. `runhours/`. Every call's response is saved to a fil
 | 6 | `python3 scripts/runhours_build.py runhours <history files>` | `agg.json`, `days.csv`; prints the notes |
 | 7 | `python3 scripts/render_runhours.py runhours/agg.json runhours` | the HTML, named `<site>-run-hours-<dates>.html` |
 
-- **Discovery is one row per unit with its points nested**, names, level and zone included, not a list of metadata ids: the rules in `run-hours-signals.md` sort points by name, so metadata PEAK adds later is picked up without an edit. A unit's name, type and level travel once rather than on every point — about 45% smaller than a point per row, 162 KB for 207 Pacific Highway's 117 units. A page holds 1,000 units; where `pagination.total` is over that, fetch the other pages in parallel with `start_index` 1000, 2000, … rather than one after another. Units with no points come back too, so plant never integrated is counted in the notes.
-- **The census is two counts**: every unit at the site, and units of a type the two tables know, each `limit: 1` so only `pagination.total` matters (~200 bytes each). Equal counts mean no unit is of a type PEAK added after the tables were written; a difference is named in the notes. The tables cover PEAK's whole catalogue as of September 2026.
+- **Discovery is one row per unit with its points nested**, names, level and zone included, not a list of metadata ids: the rules in `run-hours-signals.md` sort points by name, so metadata PEAK adds later is picked up without an edit. A unit's name, type, level and zone travel once rather than on every point. A page holds 1,000 units; where `pagination.total` is over that, fetch the other pages in parallel with `start_index` 1000, 2000, … rather than one after another. Units with no points come back too, so plant never integrated is counted in the notes.
+- **The census is two counts**: every unit at the site, and units of a type the two tables know, each `limit: 1` so only `pagination.total` matters (~200 bytes each). Between them the two tables list every equipment type in PEAK's catalogue, so equal counts mean every unit is of a known type; a difference means PEAK has added a type, and the notes say how many units it covers.
 - **History**: the plan packs ~36 points per call, ~1.6 MB. The binding limit is payload size, not the 30 s timeout: past ~2 MB the gateway hard-fails with a 5xx — halve the call's `fav_ids` and retry.
 - **Loading**: the scripts absorb every payload shape and filter to their own `fav_ids`, because the tool-results directory is shared across concurrent sessions. Never print raw rows or "sample" elements: one careless print puts the whole blob in context.
-- **Nothing to draw** — the plan prints no history calls — stop there and say why, as the plan does: either no plant carries a sensor that shows running (with the summary and any unclassified types), or none of the units with one logged anything all week, which is the site's data feed down, not the plant. For the second the plan prints a last-reading call; make it and say since when (Darling Quarter: 1 April 2026). No empty view.
+- **Nothing to draw** — the plan prints no history calls — stop there and say why, as the plan does: either no plant carries a sensor that shows running (with the summary and any unclassified types), or none of the units with one logged anything all week, which is the site's data feed down, not the plant. For the second the plan prints a last-reading call; make it and say when the site last reported. No empty view.
 
 ## Which point draws the row
 
@@ -39,20 +39,20 @@ Each unit brings up to two sensors — its **status** and an **analog** (speed, 
 
 | The unit has | The row is drawn from |
 | --- | --- |
-| Status and analog, both changing | Whichever shows less running, over the slots both reported. The usual faults — a status stuck on, an enable mapped as status, a speed output idling above zero — all add hours, so the smaller count is the genuine one. The exception is a signal that switched on no more than once all week beside one that switched on and off to a pattern: it has stopped following the unit and gives way, however little it shows (100 Arthur Street: a pump speed on for 15 minutes beside a status that ran on thirteen occasions) |
+| Status and analog, both changing | Whichever shows less running, over the slots both reported. The usual faults — a status stuck on, an enable mapped as status, a speed output idling above zero — all add hours, so the smaller count is the genuine one. The exception is a signal that switched on no more than once all week beside one that switched on at least three times: it has stopped following the unit and gives way, however little it shows |
 | Status and analog, one held at one value all week | The one that changes. A status on all week beside a speed that follows the trading day is the textbook case |
 | Status and analog, both held | Status when they agree; hatched as no reliable data when they don't |
 | Status only | Status. On all week is kept, and named in the notes as unverified |
-| Analog or speed state only | The analog. Held at one running value all week is hatched — it shows a setting, not when the unit ran (180 fan coils at Diageo 1HQ hold `Fan Speed (MSV)` at 3 or 4 all week); held at zero or off, it did not run |
+| Analog or speed state only | The analog. Held at one running value all week is hatched — a fan speed state held at 3 all week shows the speed the unit is set to, not when it ran; held at zero or off, it did not run |
 | Only a compressor status | The compressor, named in the notes: it cannot show whether the fan ran |
 | Only an enable, command or schedule | Not drawn: no sensor shows the unit ran. Named in the notes |
 | No point with history | Not drawn; named in the notes |
 
 - **ON**: a binary point is ON at 1; a multistate one at its running states — for an `(MSV)` state, 1 and above where the week shows a 0 (numbered from 0, 0 is off), else 2 and above (numbered from 1, the BACnet convention, 1 is off); an analog above 5% of its own maximum for the week.
-- **Slots** are the site's wall clock, 15 minutes each; a slot is ON if any reading in it is. A reading holds until the next for up to an hour — or, for a point that reports less often, one and a half times its own usual interval: at 100 Arthur Street some statuses are polled every 4 hours, with a reading at each change, and hold 6. A longer silence is hatched, never drawn as off.
-- **Change-of-value logging**: a point that sends a handful of readings a week, nearly each one a change, is logged on change rather than every 15 minutes, so each reading holds until the next — silence is the value not changing. A two-state point was the other way before its first reading; anything else is hatched until then. 100 Arthur Street logs 39 of its drawn units this way: `Mon 07:22=1 · Mon 17:39=0 · Tue 06:58=1 …`.
-- **"Common" pair points** — `Common - PCHWP - 3/4`, `FB SHP Pump P-10A/B - COMMON`, `AHU-CHWP-10-11-COMMON` — are left out where a member unit is drawn from a sensor at least as good as the pair's own, and kept where they are the only record of the pumps running. A COMMON record that names no member numbers (`EWH-OFFICE-COMMON`) is drawn like any unit if it has a sensor. A pair is grouped with its members.
-- **Mistyped units** — the name says one type, PEAK another — are grouped by the name only for the pairs in the reference's **Regrouped by name** table (fan coils typed as AHU or PAC, kitchen fans typed as exhaust fans, primary and secondary pumps), and the notes say so. A location code opening a name (`CH AHU-12 Kitchen`, `EC Boiler-01`) never regroups a unit.
+- **Slots** are the site's wall clock, 15 minutes each; a slot is ON if any reading in it is. A reading holds until the next for up to an hour — or, for a point that reports less often, one and a half times its own usual interval, so a status polled every 4 hours holds 6. A longer silence is hatched, never drawn as off.
+- **Change-of-value logging**: a point that sends a handful of readings a week, nearly each one a change, is logged on change rather than every 15 minutes, so each reading holds until the next — silence is the value not changing. A two-state point was the other way before its first reading; anything else is hatched until then. Such a point reads like `Mon 07:22=1 · Mon 17:39=0 · Tue 06:58=1 …`.
+- **"Common" pair points** — `Common - PCHWP - 3/4`, `SHWP P-10A/B - COMMON`, `AHU-CHWP-10-11-COMMON` — are left out where a member unit is drawn from a sensor at least as good as the pair's own, and kept where they are the only record of the pumps running. A COMMON record that names no member numbers (`EWH-COMMON`) is drawn like any unit if it has a sensor. A pair is grouped with its members.
+- **Mistyped units** — the name says one type, PEAK another — are grouped by the name only for the pairs in the reference's **Regrouped by name** table (fan coils typed as AHU or PAC, kitchen fans typed as exhaust fans, primary and secondary pumps), and the notes say so. A location code opening a name (`CH AHU-12`, `EC Boiler-01`) never regroups a unit.
 
 ## Display
 
@@ -66,7 +66,7 @@ Two pages, stacked in one file and printing one chart per sheet: **Central plant
 | Working hours | A grey column on each day, headed "Mon 14" over "9am-10pm". A closed day has no column and says "closed" |
 | Bars | Exact to 15 minutes: grey-blue during working hours, orange outside them, hatched where there is no reliable data |
 | Legend | During working hours, Outside working hours, and No reliable data only when a page uses it |
-| Labels | The unit name, indented under the group, cut with "…" when too long, a "›" after each. Its level and zone sit right-aligned before the week, smaller and muted: `L21 · Tenant-Open-Office`. A default zone (`Zone1`), one that repeats the level or is in the name, is left out; a long zone is shortened while 8 characters of it show, else the level stands alone, else neither: never a fragment. Hovering gives the full name, the point used, and level and zone as PEAK has them |
+| Labels | The unit name, indented under the group, cut with "…" when too long, a "›" after each. Its level and zone sit right-aligned before the week, smaller and muted: `L3 · Open Office`. A default zone (`Zone1`), one that repeats the level or is in the name, is left out; a long zone is shortened while 8 characters of it show, else the level stands alone, else neither: never a fragment. Hovering gives the full name, the point used, and level and zone as PEAK has them |
 | Hover | "On Mon 14 07:00 to Tue 15 01:15", "Running all week", "Did not run this week", or why the data is not reliable |
 
 No totals, no hour ticks, no part-hour shading, and never an em or en dash in the page. Colours, fonts and layout are named constants at the top of the renderer — restyle there, not in prose.
@@ -138,7 +138,7 @@ inline view               (the same file, once, where the client has one)
               "nodata": null,              // or why the whole row is hatched
               "level_break": false,        // small gap above: first unit of a new level
               "point": "str",              // the point the row was drawn from
-              "where": ["L21", "Tenant-Open-Office"],   // level and zone for the label, "" where left out; [] for neither
+              "where": ["L3", "Open Office"],      // level and zone for the label, "" where left out; [] for neither
               "where_full": "str"          // level and zone as PEAK has them, for the hover
             }
           ]

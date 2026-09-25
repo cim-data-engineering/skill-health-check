@@ -158,8 +158,8 @@ class Rules:
         if any(rx.search(n) for rx, exempt in self.never if exempt not in flags) \
                 or any(p.search(n) for p in ty.get("also_never", [])):
             return None
-        # A point this type's exception lets through — a calorifier's heating enable — is
-        # its last resort: a DHW pump enable beside it still decides the row.
+        # A point only this type's exception lets through — a boiler's burner status — is
+        # its last resort: the boiler's own status beside it still decides the row.
         excepted = any(rx.search(n) for rx, exempt in self.never if exempt)
         match = None
         for role, ends in self.endings.items():
@@ -197,9 +197,9 @@ class Rules:
     def charted_type(self, equipment_name, peak_type):
         """The type a unit is drawn under: its name's, where Regrouped by name allows the pair.
 
-        A name that names PEAK's own type anywhere keeps it ('CH AHU-12 Kitchen' is an
+        A name that names PEAK's own type anywhere keeps it ('CH AHU-12' is an
         AHU). Otherwise the first name word whose type may take PEAK's decides
-        ('HB FCU BATT-ROOM' typed AHU is a fan coil); a location code such as the
+        ('B2 FCU PLANT-ROOM' typed AHU is a fan coil); a location code such as the
         'CH' or 'EC' opening a name is passed over, since no row lets a chiller take
         an AHU or an evaporative cooler take a boiler.
         """
@@ -342,9 +342,9 @@ def _number(tok):
 def pair_members(unit):
     """(name words, member numbers) for a COMMON record that names the units it pairs, else None.
 
-    'Common - PCHWP - 3/4', 'FB SHP Pump P-10A/B - COMMON', 'AHU-CHWP-10-11-COMMON'
-    and 'CT-BASEMENT-AHU-10&11-COMMON' all do. Only bare numbers count: 'VRV-L11-COMMON'
-    is a level's group and 'EWH-OFFICE-COMMON' names no units, so neither is a pair.
+    'Common - PCHWP - 3/4', 'SHWP P-10A/B - COMMON', 'AHU-CHWP-10-11-COMMON' and
+    'PUMP-10&11-COMMON' all do. Only bare numbers count: 'VRV-L11-COMMON' is a
+    level's group and 'EWH-COMMON' names no units, so neither is a pair.
     """
     tokens = name_tokens(unit["name"])
     if "COMMON" not in tokens:

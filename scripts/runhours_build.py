@@ -102,8 +102,8 @@ def hold_slots(slots):
     """How long a reading holds: 1.5 times the point's usual interval, and never under an hour.
 
     Most points report every 15 minutes, so a silence over an hour is an outage.
-    Some are polled far less often — at 100 Arthur Street, exhaust fan statuses
-    every 4 hours with a reading at each change — and hold 6.
+    Some are polled far less often — a status every 4 hours, with a reading at
+    each change — and hold 6.
     """
     marks = sorted(slots)
     steps = sorted(b - a for a, b in zip(marks, marks[1:]))
@@ -115,9 +115,8 @@ def logged_on_change(series):
     """Whether a point reports on change of value rather than every 15 minutes.
 
     Such a point sends a handful of readings a week, and nearly every one differs
-    from the one before; a periodic point sends one a slot, mostly unchanged. At
-    100 Arthur Street 210 points log this way: 10 readings a week, at 07:00 and
-    18:00, each a change.
+    from the one before; a periodic point sends one a slot, mostly unchanged. A
+    typical one sends ten readings a week, at 07:00 and 18:00, each a change.
     """
     if len(series) < 2 or len(series) > WEEK * CHANGE_LOG_SHARE:
         return False
@@ -221,9 +220,9 @@ def both_signals(sp, sr, ap, ar):
     """Status beside analog: set aside a held one; else whichever shows less running.
 
     A signal that switched on no more than once all week, beside one that
-    switched on and off to a pattern, has stopped following the unit: at
-    100 Arthur Street a pump's speed read 15 minutes against a status that
-    ran on thirteen occasions. It gives way however little it shows.
+    switched on and off to a pattern, has stopped following the unit — a speed
+    on for 15 minutes all week beside a status that ran thirteen times. It gives
+    way however little it shows.
     """
     if not sr["stuck"] and not ar["stuck"]:
         hs, ha = common_hours(sr, ar)
@@ -304,7 +303,7 @@ def where(unit):
     """([level, zone] for the label, "" where dropped, and hover text); the label keeps only what informs.
 
     A zone is dropped where it is a default (Zone1, All), repeats the level, or is in
-    the unit's own name (HB FCU Tack-Bar-A in zone Tack Bar); a level that a more
+    the unit's own name (FCU Kitchen-A in zone Kitchen); a level that a more
     specific zone repeats gives way to it ('Level 2' beside 'Level 2 Kitchen'), and
     'Level 3' is shortened to 'L3'. The hover keeps both as PEAK has them.
     """
