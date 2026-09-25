@@ -18,6 +18,8 @@ runs wherever the skill is unpacked.
 import argparse
 import csv
 import json
+import math
+import re
 import sys
 from collections import Counter
 from datetime import date, datetime
@@ -29,7 +31,8 @@ from runhours_history import load_rows  # noqa: E402
 # ---- Tunables ----------------------------------------------------------------
 SLOTS_PER_DAY   = 96     # 15-minute slots
 WEEK            = 7 * SLOTS_PER_DAY
-BRIDGE_SLOTS    = 4      # a gap up to an hour holds the last reading; longer is hatched
+BRIDGE_SLOTS    = 4      # a gap up to an hour holds the last reading; longer is hatched ...
+HOLD_FACTOR     = 1.5    # ... unless the point reports less often: then 1.5 times its usual interval
 ANALOG_ON_SHARE = 0.05   # an analog is ON above 5% of its own weekly maximum
 DISAGREE_HOURS  = 2.0    # status and analog this far apart (and 10%) get a note
 ONE_OFF_RUNS    = 1      # a signal that switched on this often or less ...
@@ -37,6 +40,7 @@ PATTERN_RUNS    = 3      # ... gives way to one that switched on at least this o
 CHANGE_LOG_SHARE = 0.5   # a point with readings in under half the week's slots ...
 CHANGE_READINGS = 0.8    # ... where this share of readings differ from the one before logs on change
 NAMES_IN_NOTE   = 8      # list names in a note up to this many, then just count
+GENERIC_ZONE    = re.compile(r"(zone|area|default|all|general|none|n/?a|unassigned|site|building)\s*\d*", re.I)
 PAGE_ORDER      = ["Central plant", "Field units", "Other"]
 SIGNAL_WORDS    = {"status": "run status", "state": "speed state", "analog": "speed or other analog",
                    "compressor": "compressor status"}
@@ -70,8 +74,8 @@ def slot_readings(rows, window):
     return out
 
 
-def bridge(raw, last, on_change=False, before=None):
-    """Hold the last reading across gaps of up to BRIDGE_SLOTS; leave longer gaps None.
+def bridge(raw, last, hold=BRIDGE_SLOTS, on_change=False, before=None):
+    """Hold the last reading across gaps of up to `hold` slots; leave longer gaps None.
 
     A point logged on change of value holds every reading until the next, to the
     end of the week — silence is the value not changing. Before its first reading
@@ -87,11 +91,24 @@ def bridge(raw, last, on_change=False, before=None):
             j += 1
         if on_change and i == 0:
             out[i:j] = [before] * j
-        elif on_change or j - i <= BRIDGE_SLOTS:
+        elif on_change or j - i <= hold:
             fill = last[i - 1] if i > 0 else (out[j] if j < WEEK else None)
             out[i:j] = [fill] * (j - i)
         i = j
     return out
+
+
+def hold_slots(slots):
+    """How long a reading holds: 1.5 times the point's usual interval, and never under an hour.
+
+    Most points report every 15 minutes, so a silence over an hour is an outage.
+    Some are polled far less often — at 100 Arthur Street, exhaust fan statuses
+    every 4 hours with a reading at each change — and hold 6.
+    """
+    marks = sorted(slots)
+    steps = sorted(b - a for a, b in zip(marks, marks[1:]))
+    usual = steps[len(steps) // 2] if steps else 1
+    return max(BRIDGE_SLOTS, math.ceil(HOLD_FACTOR * usual))
 
 
 def logged_on_change(series):
@@ -140,7 +157,7 @@ def read_point(rec, point):
     before = None
     if on_change and distinct <= {0.0, 1.0} and all(a != b for a, b in zip(series, series[1:])):
         before = 1.0 - series[0]              # a switch that logs only changes was the other way before
-    on = [None if v is None else is_on(v) for v in bridge(raw, last, on_change, before)]
+    on = [None if v is None else is_on(v) for v in bridge(raw, last, hold_slots(slots), on_change, before)]
     return {"on": on, "stuck": len(distinct) == 1, "held": series[0] if len(distinct) == 1 else None,
             "hours": sum(1 for x in on if x) / 4, "runs": len(ranges(on, True)), "on_change": on_change}
 
@@ -273,6 +290,34 @@ def signal_kind(point):
     return "state" if point.get("state") else point["role"]
 
 
+def _words(text):
+    return re.findall(r"[a-z0-9]+", (text or "").lower())
+
+
+def _within(part, whole):
+    """Whether part's words run, in order, somewhere in whole."""
+    p, w = _words(part), _words(whole)
+    return bool(p) and any(w[i:i + len(p)] == p for i in range(len(w) - len(p) + 1))
+
+
+def where(unit):
+    """([level, zone] for the label, "" where dropped, and hover text); the label keeps only what informs.
+
+    A zone is dropped where it is a default (Zone1, All), repeats the level, or is in
+    the unit's own name (HB FCU Tack-Bar-A in zone Tack Bar); a level that a more
+    specific zone repeats gives way to it ('Level 2' beside 'Level 2 Kitchen'), and
+    'Level 3' is shortened to 'L3'. The hover keeps both as PEAK has them.
+    """
+    level, zone = (" ".join((unit.get(k) or "").split()) for k in ("level", "zone"))
+    hover = " · ".join(x for x in (level, zone) if x)
+    if zone and (GENERIC_ZONE.fullmatch(zone) or _within(zone, unit["name"]) or _within(zone, level)):
+        zone = ""
+    if level and zone and _within(level, zone):
+        level = ""
+    level = re.sub(r"\blevel\s+(\d+)\b", r"L\1", level, flags=re.I)
+    return ([level, zone] if level or zone else []), hover
+
+
 # ---- Build -------------------------------------------------------------------
 def build(window, plan, rows, max_pass):
     units = [u for u in plan["units"] if u["pass"] <= max_pass]
@@ -288,6 +333,7 @@ def build(window, plan, rows, max_pass):
         row = {"name": u["name"], "runs": [], "gaps": [], "nodata": d.nodata, "point": None,
                "level_break": bool(prev and prev["type_name"] == u["type_name"]
                                    and prev["level"] != u["level"])}
+        row["where"], row["where_full"] = where(u)
         prev = u
         favs = [p["fav_id"] for p in u["pull"]]
         if d.point:
@@ -342,7 +388,8 @@ def day_rows(window, unit, chosen, reading):
         on = reading["on"][i * SLOTS_PER_DAY:(i + 1) * SLOTS_PER_DAY]
         wh = day["wh"] or [0, 0]
         lit = [s for s, x in enumerate(on) if x]
-        out.append({"name": unit["name"], "type": unit["type_name"], "date": day["date"],
+        out.append({"name": unit["name"], "type": unit["type_name"], "level": unit.get("level") or "",
+                    "zone": unit.get("zone") or "", "date": day["date"],
                     "run_h": len(lit) / 4,
                     "first_on": hhmm(lit[0]) if lit else "",
                     "last_off": hhmm(lit[-1] + 1) if lit else "",
@@ -441,8 +488,8 @@ def main(argv):
         sys.exit(f"runhours_build: {exc}")
     (work / "agg.json").write_text(json.dumps(agg, indent=1))
     with open(work / "days.csv", "w", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=["name", "type", "date", "run_h", "first_on",
-                                                "last_off", "ooh_h", "signal", "point"])
+        writer = csv.DictWriter(fh, fieldnames=["name", "type", "level", "zone", "date", "run_h",
+                                                "first_on", "last_off", "ooh_h", "signal", "point"])
         writer.writeheader()
         writer.writerows(days)
     drawn = sum(len(g["rows"]) for p in agg["pages"] for g in p["groups"])

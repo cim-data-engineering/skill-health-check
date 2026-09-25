@@ -8,8 +8,7 @@ Usage:
 
 window  Reads the saved search_sites result (timezone and working hours), fixes
         the last full Monday-to-Sunday week in site local time, writes
-        <workdir>/window.json and <workdir>/calls.json and prints the discovery
-        and census calls to make.
+        <workdir>/window.json and prints the discovery and census calls to make.
 plan    Sorts every discovered point with the rules in
         references/run-hours-signals.md, picks each unit's candidate points,
         orders the units for the view, splits them into a first pass of about
@@ -310,6 +309,7 @@ def cmd_window(args):
         "args": {"site_id": site["site_id"], "is_active": True, "metadata_type_codes": charted,
                  "limit": DISCOVERY_LIMIT, "start_index": 0},
         "fields": ["equipment_id", "name", "metadata_type.type_code", "zone.level.level_name",
+                   "zone.zone_name.zone_name",
                    {"path": "favourites", "sub_fields": [
                        "fav_id", "is_active", "metadata.name",
                        {"path": "history_available",
@@ -321,7 +321,6 @@ def cmd_window(args):
                "args": {"site_id": site["site_id"], "is_active": True, **extra, "limit": 1},
                "fields": ["equipment_id"]}
               for extra in ({}, {"metadata_type_codes": known})]
-    (work / "calls.json").write_text(json.dumps({"discovery": discovery, "census": census}, indent=1))
     print(f"{site['site_name']}: {window['label']} ({window['tz_label']}), "
           f"{window['start']} to {window['end']} UTC. Wrote {work / 'window.json'}.")
     print(f"Discovery, one call per {DISCOVERY_LIMIT} units. When pagination.total is over "
@@ -393,6 +392,7 @@ def read_units(paths):
             "equipment_id": eid, "name": eq.get("name") or str(eid),
             "peak_type": (eq.get("metadata_type") or {}).get("type_code"),
             "level": ((eq.get("zone") or {}).get("level") or {}).get("level_name"),
+            "zone": ((eq.get("zone") or {}).get("zone_name") or {}).get("zone_name"),
             "points": []})
 
     for path in paths:
@@ -413,8 +413,8 @@ def read_units(paths):
 def read_census(paths):
     """(units per type, type names, units of an unknown type) from the saved census.
 
-    A full census — every unit's type, as the direct fetcher saves it — is
-    counted by type and names any unknown type. The MCP's two counts — every
+    A full census — every unit's type, as older runs saved it — is counted
+    by type and names any unknown type. The MCP's two counts — every
     unit, and units of a type the tables know, each a pagination.total — give
     only how many units are of an unknown type, the difference.
     """
@@ -555,7 +555,7 @@ def cmd_plan(args):
     dead = [u for u in units if u.get("why") == "no history this week"]
     plan = {
         "units": [{k: u.get(k) for k in ("equipment_id", "name", "type", "type_name", "page",
-                                          "level", "regrouped_from", "pass", "pull", "why")}
+                                          "level", "zone", "regrouped_from", "pass", "pull", "why")}
                   for u in units],
         "chunks": chunks,
         "unclassified": [{"code": c, "type": census_names.get(c, c), "units": n}

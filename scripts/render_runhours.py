@@ -53,14 +53,20 @@ FS_DAY      = 13
 FS_HOURS    = 12
 FS_GROUP    = 13
 FS_ROW      = 13
+FS_WHERE    = 11     # a unit's level and zone, the label's third tier
 
 # ---- Layout ------------------------------------------------------------------
 WIDTH       = 1040
-LABEL_COL   = 214    # the week starts here
+LABEL_COL   = 214    # the week starts here ...
+LABEL_COL_WHERE = 300   # ... or here, where rows carry a level or zone
+WHERE_GAP   = 12     # level and zone end this far short of the week
+NAME_GAP    = 12     # least space between a name and its level and zone
+WHERE_MIN   = 34     # narrower than this, a row's level and zone are left out
+WHERE_CHARS = 8      # a zone is shortened with an ellipsis only while this much of it shows
 RIGHT_PAD   = 16
 LEFT_PAD    = 24     # title, legend and group labels
 ROW_INDENT  = 36     # unit labels sit under their group label
-LABEL_MAX_W = LABEL_COL - 50   # a longer label is cut with an ellipsis
+LABEL_MAX_W = 50     # a name is cut with an ellipsis this far short of the week
 TITLE_Y     = 38
 SUBTITLE_Y  = 62
 LEGEND_Y    = 78
@@ -93,11 +99,16 @@ const text = (x, y, s, size, fill, extra) =>
 const tip = (name, s) => `<title>${esc(name)}\n${esc(s)}</title>`;
 
 function row(r, y, fg, hatch) {
-  const [name, runs, gaps, nodata, , link, point] = r, by = y + (K.rowH - K.barH) / 2;
-  fg.push(`<a href="${esc(D.linkPrefix + link)}" target="_blank" rel="noopener"><text class="lbl" x="${K.rowIndent}" ` +
-    `y="${(y + K.rowH / 2 + 4.5).toFixed(1)}" font-size="${K.fsRow}" fill="${K.text}"><title>Open the PEAK chart for ` +
-    `${esc(name)}${point ? " (" + esc(point) + ")" : ""}</title><tspan class="nm">${esc(name)}</tspan>` +
-    `<tspan fill="${K.muted}"> ›</tspan></text></a>`);
+  const [name, runs, gaps, nodata, , link, point, where, whereFull] = r, by = y + (K.rowH - K.barH) / 2;
+  const ty = (y + K.rowH / 2 + 4.5).toFixed(1);
+  const hover = "Open the PEAK chart for " + name + (point ? " (" + point + ")" : "") + (whereFull ? "\n" + whereFull : "");
+  fg.push(`<g class="rl"><a href="${esc(D.linkPrefix + link)}" target="_blank" rel="noopener"><text class="lbl" ` +
+    `x="${K.rowIndent}" y="${ty}" font-size="${K.fsRow}" fill="${K.text}"><title>${esc(hover)}</title>` +
+    `<tspan class="nm">${esc(name)}</tspan><tspan fill="${K.muted}"> ›</tspan></text></a>` +
+    (where.length ? `<text class="wh" x="${X0 - K.whereGap}" y="${ty}" font-size="${K.fsWhere}" fill="${K.muted}" ` +
+      `text-anchor="end" data-parts="${esc(JSON.stringify(where))}"><title>${esc(whereFull)}</title>` +
+      `<tspan class="wt">${esc(where.filter(Boolean).join(" · "))}</tspan></text>` : "") +
+    `</g>`);
   if (nodata) {
     fg.push(`<rect x="${X0}" y="${by}" width="${X1 - X0}" height="${K.barH}" fill="url(#${hatch})">${tip(name, nodata)}</rect>`);
     return;
@@ -152,11 +163,28 @@ function chart(pi, el) {
   el.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0 0 ${K.width} ${height}" role="img" ` +
     `aria-label="${esc(title + " run times against working hours at " + D.site + ", " + D.window)}">${defs}` +
     `<rect width="${K.width}" height="${height}" fill="${K.card}"/>${bg.join("")}${fg.join("")}</svg>`;
-  el.querySelectorAll("text.lbl").forEach(label => {        // cut long names to the label column
-    const nm = label.querySelector(".nm"); let s = nm.textContent;
-    while (label.getComputedTextLength() > K.labelMaxW && s.length > 4) {
-      s = s.slice(0, -1).replace(/[\s-]+$/, ""); nm.textContent = s + "…";
+  const budget = X0 - K.whereGap - K.rowIndent;             // the label column, less its margins
+  const cut = (el, span, max, keep) => { let s = span.textContent;
+    while (el.getComputedTextLength() > max && s.length > keep) {
+      s = s.slice(0, -1).replace(/[\s·,-]+$/, ""); span.textContent = s + "…";
+    } };
+  // Level and zone fit whole, or with the zone shortened while enough of it shows, or as the
+  // level alone, or not at all: a clipped fragment such as "Carria…" tells the reader nothing.
+  const fit = (wh, room) => {
+    const span = wh.querySelector(".wt"), [level, zone] = JSON.parse(wh.dataset.parts);
+    const fits = s => { span.textContent = s; return wh.getComputedTextLength() <= room; };
+    if (fits([level, zone].filter(Boolean).join(" · "))) return true;
+    const head = level ? level + " · " : "";                // only a zone is ever shortened
+    for (let s = zone; s.length > K.whereChars; ) {
+      s = s.slice(0, -1).replace(/[\s·,-]+$/, "");
+      if (fits(head + s + "…")) return true;
     }
+    return Boolean(level && zone) && fits(level);
+  };
+  el.querySelectorAll("g.rl").forEach(g => {                // the name keeps its room; level and zone fit after
+    const label = g.querySelector("text.lbl"), wh = g.querySelector("text.wh");
+    cut(label, label.querySelector(".nm"), wh ? budget - K.nameGap - K.whereMin : X0 - K.labelMaxW, 4);
+    if (wh && !fit(wh, budget - label.getComputedTextLength() - K.nameGap)) wh.remove();
   });
 }
 
@@ -194,18 +222,21 @@ def compact(agg):
         "ids": [PAGE_IDS.get(p["title"], f"page-{i}") for i, p in enumerate(agg["pages"])],
         "pages": [[p["title"], [[g["name"], [[r["name"], r["runs"], r.get("gaps", []), r.get("nodata") or "",
                                               int(bool(r.get("level_break"))), r["href"][len(prefix):],
-                                              r.get("point") or ""] for r in g["rows"]]]
+                                              r.get("point") or "", r.get("where") or [], r.get("where_full") or ""]
+                                             for r in g["rows"]]]
                                 for g in p["groups"]]] for p in agg["pages"]],
     }
 
 
-def constants():
+def constants(agg):
+    wide = any(r.get("where") for p in agg["pages"] for g in p["groups"] for r in g["rows"])
     return {
         "in": C_IN_HOURS, "out": C_OUT_OF_HOURS, "band": C_WH_BAND, "midnight": C_MIDNIGHT,
         "hatchBg": C_HATCH_BG, "hatchLine": C_HATCH_LINE, "text": C_TEXT, "muted": C_MUTED, "card": C_CARD,
         "fsTitle": FS_TITLE, "fsSubtitle": FS_SUBTITLE, "fsLegend": FS_LEGEND, "fsDay": FS_DAY,
-        "fsHours": FS_HOURS, "fsGroup": FS_GROUP, "fsRow": FS_ROW,
-        "width": WIDTH, "labelCol": LABEL_COL, "rightPad": RIGHT_PAD, "leftPad": LEFT_PAD,
+        "fsHours": FS_HOURS, "fsGroup": FS_GROUP, "fsRow": FS_ROW, "fsWhere": FS_WHERE,
+        "width": WIDTH, "labelCol": LABEL_COL_WHERE if wide else LABEL_COL, "rightPad": RIGHT_PAD, "leftPad": LEFT_PAD,
+        "whereGap": WHERE_GAP, "nameGap": NAME_GAP, "whereMin": WHERE_MIN, "whereChars": WHERE_CHARS,
         "rowIndent": ROW_INDENT, "labelMaxW": LABEL_MAX_W, "titleY": TITLE_Y, "subtitleY": SUBTITLE_Y,
         "legendY": LEGEND_Y, "legendW": LEGEND_W, "gridTop": GRID_TOP, "rowH": ROW_H, "barH": BAR_H,
         "groupH": GROUP_H, "groupGap": GROUP_GAP, "levelGap": LEVEL_GAP, "bottomPad": BOTTOM_PAD,
@@ -255,7 +286,7 @@ def render(agg):
   <footer>{escape(agg.get('footer', ''))}</footer>
 </main>
 <script>
-const K = {_js(constants())};
+const K = {_js(constants(agg))};
 const D = {_js(data)};
 {SCRIPT.strip()}
 </script>

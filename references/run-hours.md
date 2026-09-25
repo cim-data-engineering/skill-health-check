@@ -20,34 +20,18 @@ Work in one directory, e.g. `runhours/`. Every call's response is saved to a fil
 | Step | Do | Keeps |
 | --- | --- | --- |
 | 1 | `search_sites` as above | the response, as `runhours/site.json` |
-| 2 | `python3 scripts/runhours_plan.py window runhours/site.json runhours` | `window.json`, `calls.json`; prints the discovery call and the two census counts |
+| 2 | `python3 scripts/runhours_plan.py window runhours/site.json runhours` | `window.json`; prints the discovery call and the two census counts |
 | 3 | All three printed calls, in parallel, with `execute_graphql_query` | `discovery-0.json` (more pages if any), `census-all.json`, `census-known.json` |
 | 4 | `python3 scripts/runhours_plan.py plan runhours runhours/discovery-*.json --census runhours/census-all.json runhours/census-known.json` | `plan.json`; prints the first-pass history calls |
 | 5 | Each printed call as `execute_graphql_query(platform.history, …, fields: ["fav_id", "ts", "data"])`, in parallel | the history files |
 | 6 | `python3 scripts/runhours_build.py runhours <history files>` | `agg.json`, `days.csv`; prints the notes |
 | 7 | `python3 scripts/render_runhours.py runhours/agg.json runhours` | the HTML, named `<site>-run-hours-<dates>.html` |
 
-- **Discovery is one row per unit with its points nested**, names included, not a list of metadata ids: the rules in `run-hours-signals.md` sort points by name, so metadata PEAK adds later is picked up without an edit. A unit's name, type and level travel once rather than on every point — about 45% smaller than a point per row, 162 KB for 207 Pacific Highway's 117 units. A page holds 1,000 units; where `pagination.total` is over that, fetch the other pages in parallel with `start_index` 1000, 2000, … rather than one after another. Units with no points come back too, so plant never integrated is counted in the notes.
+- **Discovery is one row per unit with its points nested**, names, level and zone included, not a list of metadata ids: the rules in `run-hours-signals.md` sort points by name, so metadata PEAK adds later is picked up without an edit. A unit's name, type and level travel once rather than on every point — about 45% smaller than a point per row, 162 KB for 207 Pacific Highway's 117 units. A page holds 1,000 units; where `pagination.total` is over that, fetch the other pages in parallel with `start_index` 1000, 2000, … rather than one after another. Units with no points come back too, so plant never integrated is counted in the notes.
 - **The census is two counts**: every unit at the site, and units of a type the two tables know, each `limit: 1` so only `pagination.total` matters (~200 bytes each). Equal counts mean no unit is of a type PEAK added after the tables were written; a difference is named in the notes. The tables cover PEAK's whole catalogue as of September 2026.
 - **History**: the plan packs ~36 points per call, ~1.6 MB. The binding limit is payload size, not the 30 s timeout: past ~2 MB the gateway hard-fails with a 5xx — halve the call's `fav_ids` and retry.
 - **Loading**: the scripts absorb every payload shape and filter to their own `fav_ids`, because the tool-results directory is shared across concurrent sessions. Never print raw rows or "sample" elements: one careless print puts the whole blob in context.
 - **Nothing to draw** — the plan prints no history calls — stop there and say why, as the plan does: either no plant carries a sensor that shows running (with the summary and any unclassified types), or none of the units with one logged anything all week, which is the site's data feed down, not the plant. For the second the plan prints a last-reading call; make it and say since when (Darling Quarter: 1 April 2026). No empty view.
-
-### Straight to the API, in Claude Code
-
-Where the environment has PEAK API credentials — `ACCESS_TOKEN_URL`, `CLIENT_ID` and `OFFLINE_TOKEN_ACCESS` or `CLIENT_SECRET`, as peak-api-helper reads them — `scripts/runhours_fetch.py` makes steps 1, 3 and 5 itself: each printed call runs as the matching core GraphQL query, history six at a time, and every response lands in the work directory in the shape the scripts read. No tool round trips and nothing saved by hand; 10 to 30 seconds for a whole site, later pass included.
-
-```
-python3 scripts/runhours_fetch.py site runhours 359                 # or a site name; replaces search_sites
-python3 scripts/runhours_plan.py window runhours/site.json runhours
-python3 scripts/runhours_fetch.py discover runhours                 # discovery pages and a full census
-python3 scripts/runhours_plan.py plan runhours runhours/discovery-*.json --census runhours/census.json
-python3 scripts/runhours_fetch.py history runhours                  # --pass 2 for the later pass
-python3 scripts/runhours_build.py runhours runhours/history-p1-*.json
-python3 scripts/render_runhours.py runhours/agg.json runhours
-```
-
-Without credentials it exits with status 2: use the MCP steps above. It prints sizes and timings only, never a token or a row.
 
 ## Which point draws the row
 
@@ -65,7 +49,7 @@ Each unit brings up to two sensors — its **status** and an **analog** (speed, 
 | No point with history | Not drawn; named in the notes |
 
 - **ON**: a binary point is ON at 1; a multistate one at its running states — for an `(MSV)` state, 1 and above where the week shows a 0 (numbered from 0, 0 is off), else 2 and above (numbered from 1, the BACnet convention, 1 is off); an analog above 5% of its own maximum for the week.
-- **Slots** are the site's wall clock, 15 minutes each; a slot is ON if any reading in it is. A gap of up to an hour holds the last reading; a longer one is hatched, never drawn as off.
+- **Slots** are the site's wall clock, 15 minutes each; a slot is ON if any reading in it is. A reading holds until the next for up to an hour — or, for a point that reports less often, one and a half times its own usual interval: at 100 Arthur Street some statuses are polled every 4 hours, with a reading at each change, and hold 6. A longer silence is hatched, never drawn as off.
 - **Change-of-value logging**: a point that sends a handful of readings a week, nearly each one a change, is logged on change rather than every 15 minutes, so each reading holds until the next — silence is the value not changing. A two-state point was the other way before its first reading; anything else is hatched until then. 100 Arthur Street logs 39 of its drawn units this way: `Mon 07:22=1 · Mon 17:39=0 · Tue 06:58=1 …`.
 - **"Common" pair points** — `Common - PCHWP - 3/4`, `FB SHP Pump P-10A/B - COMMON`, `AHU-CHWP-10-11-COMMON` — are left out where a member unit is drawn from a sensor at least as good as the pair's own, and kept where they are the only record of the pumps running. A COMMON record that names no member numbers (`EWH-OFFICE-COMMON`) is drawn like any unit if it has a sensor. A pair is grouped with its members.
 - **Mistyped units** — the name says one type, PEAK another — are grouped by the name only for the pairs in the reference's **Regrouped by name** table (fan coils typed as AHU or PAC, kitchen fans typed as exhaust fans, primary and secondary pumps), and the notes say so. A location code opening a name (`CH AHU-12 Kitchen`, `EC Boiler-01`) never regroups a unit.
@@ -82,12 +66,12 @@ Two pages, stacked in one file and printing one chart per sheet: **Central plant
 | Working hours | A grey column on each day, headed "Mon 14" over "9am-10pm". A closed day has no column and says "closed" |
 | Bars | Exact to 15 minutes: grey-blue during working hours, orange outside them, hatched where there is no reliable data |
 | Legend | During working hours, Outside working hours, and No reliable data only when a page uses it |
-| Labels | Indented under the group, cut with "…" when too long, a "›" after each; hovering gives the full name and the point used |
+| Labels | The unit name, indented under the group, cut with "…" when too long, a "›" after each. Its level and zone sit right-aligned before the week, smaller and muted: `L21 · Tenant-Open-Office`. A default zone (`Zone1`), one that repeats the level or is in the name, is left out; a long zone is shortened while 8 characters of it show, else the level stands alone, else neither: never a fragment. Hovering gives the full name, the point used, and level and zone as PEAK has them |
 | Hover | "On Mon 14 07:00 to Tue 15 01:15", "Running all week", "Did not run this week", or why the data is not reliable |
 
 No totals, no hour ticks, no part-hour shading, and never an em or en dash in the page. Colours, fonts and layout are named constants at the top of the renderer — restyle there, not in prose.
 
-Hand over the HTML file every time, and render the same view inline where the client can — in Claude Chat, one `show_widget` call with the file's contents, ~25 KB for a hundred units. Never paste the HTML into the conversation as text. Under it, the notes, then the offer of the later pass if there is one.
+Hand over the HTML file every time, and render the same view inline where the client can: the file's contents, once, to whatever inline view it offers, ~25 KB for a hundred units. Never paste the HTML into the conversation as text. Under it, the notes, then the offer of the later pass if there is one.
 
 ## Links
 
@@ -120,16 +104,14 @@ Follow-ups — a single unit, a weekday or weekend view, run-hour totals — re-
 
 ```
 search_sites              (include_working_hours: true) → runhours/site.json
-runhours_plan.py window   → window.json, calls.json, the discovery call and two census counts
+runhours_plan.py window   → window.json, the discovery call and two census counts
 execute_graphql_query     (platform.equipment discovery, and the two counts, in parallel)
 runhours_plan.py plan     → plan.json, the first-pass history calls
 execute_graphql_query     (platform.history, one per printed call, in parallel)
 runhours_build.py         → agg.json, days.csv, the notes
 render_runhours.py        → the HTML file
-show_widget               (the same file inline, once)
+inline view               (the same file, once, where the client has one)
 ```
-
-In Claude Code with PEAK API credentials, `runhours_fetch.py site`, `discover` and `history` stand in for the three MCP steps.
 
 ## Aggregate schema
 
@@ -155,7 +137,9 @@ In Claude Code with PEAK API credentials, `runhours_fetch.py site`, `discover` a
               "gaps": [[300, 310]],        // no data for over an hour: hatched
               "nodata": null,              // or why the whole row is hatched
               "level_break": false,        // small gap above: first unit of a new level
-              "point": "str"               // the point the row was drawn from
+              "point": "str",              // the point the row was drawn from
+              "where": ["L21", "Tenant-Open-Office"],   // level and zone for the label, "" where left out; [] for neither
+              "where_full": "str"          // level and zone as PEAK has them, for the hover
             }
           ]
         }
