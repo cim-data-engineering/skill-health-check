@@ -16,7 +16,7 @@ Skip the question if the invocation already names one (`/health-check equipment 
 | Equipment health snapshot | Health by equipment type, monthly | `references/equipment-health.md` |
 | Indoor environment health snapshot | Thermal comfort by level, monthly | `references/indoor-environment.md` |
 | Assignee leaderboard | Who closed the work, last 90 days | `references/assignee-leaderboard.md` |
-| Equipment run hours | When plant runs vs when the building is occupied, last full week | `references/run-hours.md` |
+| Equipment run hours | When plant runs vs when the building is occupied, last full week | `references/run-hours/run-hours.md` |
 
 ## Step 2 — Run the recipe
 
@@ -30,7 +30,7 @@ So before you write anything, look at what your client can actually render, and 
 
 Fall back to a plain markdown table only after a real attempt has failed — you looked, and the client exposes no way to render HTML at all. Then say in one line that you fell back and why, and let the key under it carry the bands. Never fall back silently. Never fall back because a table is quicker or because the numbers are already in hand. Never print a table beside a visual you have already rendered.
 
-Run hours never falls back to a table. Its view is an HTML file from `scripts/render_runhours.py`, handed over every time and rendered inline as well where the client can; if the script will not run, hand-roll the view against the same aggregate schema.
+Run hours never falls back to a table. Its view is an HTML file from `references/run-hours/scripts/render_runhours.py`, handed over every time and rendered inline as well where the client can; if the script will not run, hand-roll the view against the same aggregate schema.
 
 With the visual, in order: visual → key → source link → notes. Skip any the check does not have. Then one line in chat offering a follow-up — another check, another site, or a drill-down on a row. Nothing else.
 

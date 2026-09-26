@@ -13,10 +13,10 @@ window  Reads the saved search_sites result (timezone and working hours), fixes
         <workdir>/window.json and prints the discovery and census calls to make.
         --hours assesses against the user's hours instead of the site's.
 plan    Sorts every discovered point with the rules in
-        references/run-hours-signals.md, picks each unit's candidate points,
-        orders the units for the view, splits them into a first pass of up to
-        --cap units and the rest, writes <workdir>/plan.json and prints the
-        history calls to make.
+        references/run-hours/run-hours-signals.md, picks each unit's
+        candidate points, orders the units for the view, splits them into a
+        first pass of up to --cap units and the rest, writes
+        <workdir>/plan.json and prints the history calls to make.
 calls   Prints the history calls for the later pass, once the user asks for it.
 last    Reads the latest-reading call the plan prints when nothing logged all
         week, and says when the site last reported, in site local time.
@@ -37,7 +37,7 @@ sys.dont_write_bytecode = True             # leave no __pycache__ beside the ski
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from runhours_history import read_page, read_results  # noqa: E402
 
-SIGNALS = Path(__file__).resolve().parent.parent / "references" / "run-hours-signals.md"
+SIGNALS = Path(__file__).resolve().parent.parent / "run-hours-signals.md"
 
 # ---- Tunables ----------------------------------------------------------------
 CAP_UNITS       = 100    # first-pass size; central plant is always fetched whole
@@ -122,7 +122,7 @@ def plural(n, word):
 
 
 class Rules:
-    """The tables of references/run-hours-signals.md, ready to classify with."""
+    """The tables of references/run-hours/run-hours-signals.md, ready to classify with."""
 
     NEEDED = ("Equipment types", "Regrouped by name", "Never charted", "Roles",
               "Never a run signal", "Which point wins", "Runs around the clock")

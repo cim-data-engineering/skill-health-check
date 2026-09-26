@@ -15,11 +15,11 @@ view as well as to save; a pre-drawn SVG of the same week is several times
 larger. The data is checked here before it is written, so a malformed field
 fails in Python rather than as a blank page.
 
-The aggregate JSON (see "Aggregate schema" in references/run-hours.md) is the
-renderer's only input. Every layout / colour / font value lives in a named
-constant below so the whole look can be restyled in one place. The encodings
-themselves are the render contract in that reference's Display section and
-must not drift.
+The aggregate JSON (see "Aggregate schema" in
+references/run-hours/run-hours.md) is the renderer's only input. Every
+layout / colour / font value lives in a named constant below so the whole
+look can be restyled in one place. The encodings themselves are the render
+contract in that reference's Display section and must not drift.
 
 Standard library only — no third-party dependencies, by design, so the script
 runs wherever the skill is unpacked.

@@ -9,7 +9,7 @@ Pipeline: resolve the site → fix the week → discover every point on the site
 - **One site**: `search_sites(site_name=X, include_working_hours: true)`. Top score ≥ 0.9 → take it; otherwise show the top 3 and ask.
 - **Working hours** come from the site, each day its own. A closed day has no working hours, so all its running is outside hours. All days closed or all `00:00` → the window step stops: ask what hours to assess against, never guess, and run it again with them, `--hours "Mon-Fri 08:00-18:00, Sat 09:00-13:00"`, where a day not named is closed. The same flag assesses against hours the user names.
 - **Window**: the last full Monday-to-Sunday week in site local time; today's week is never shown. A user-named week is fine (`--week-of`). The window step converts local midnights to UTC, daylight saving included.
-- **Equipment**: every type in `references/run-hours-signals.md`, central plant first, then field units. VAVs, chilled beams, lighting, lifts and meters stay out unless the user asks (`--include LT`).
+- **Equipment**: every type in `references/run-hours/run-hours-signals.md`, central plant first, then field units. VAVs, chilled beams, lighting, lifts and meters stay out unless the user asks (`--include LT`).
 - **Sensors only**: a row is drawn only from a sensor that reports the unit running — a run status, a speed, current or power reading, a compressor status. An enable, command or occupancy schedule says what the unit was told to do, not that it ran, so a unit with nothing else is left off the chart and named in the notes, as is plant with no points at all.
 - **First pass**: up to 100 units. Central plant is always pulled whole, however many; each field-unit type follows whole where the pass stays within 100, and one too big waits for the later pass without holding back the smaller types after it. A site with no central plant starts with its first field type, whatever its size. The rest is offered after the first view, never dropped silently.
 
@@ -20,19 +20,19 @@ Work in one directory, e.g. `runhours/`. Every call's response is saved to a fil
 | Step | Do | Keeps |
 | --- | --- | --- |
 | 1 | `search_sites` as above | the response, as `runhours/site.json` |
-| 2 | `python3 scripts/runhours_plan.py window runhours/site.json runhours` | `window.json`; prints three calls and the file each response goes in |
+| 2 | `python3 references/run-hours/scripts/runhours_plan.py window runhours/site.json runhours` | `window.json`; prints three calls and the file each response goes in |
 | 3 | The three printed calls, in parallel, with `execute_graphql_query` | `discovery-0.json`, `census-all.json`, `census-known.json` |
-| 4 | `python3 scripts/runhours_plan.py plan runhours runhours/discovery-*.json --census runhours/census-all.json runhours/census-known.json` | `plan.json`; prints the first-pass history calls and their files |
+| 4 | `python3 references/run-hours/scripts/runhours_plan.py plan runhours runhours/discovery-*.json --census runhours/census-all.json runhours/census-known.json` | `plan.json`; prints the first-pass history calls and their files |
 | 5 | Each printed call, in parallel, with `execute_graphql_query` | `history-1-1.json`, `history-1-2.json`, … |
-| 6 | `python3 scripts/runhours_build.py runhours runhours/history-*.json` | `agg.json`, `days.csv`; prints the notes |
-| 7 | `python3 scripts/render_runhours.py runhours/agg.json runhours` | the HTML, named `<site>-run-hours-<dates>.html` |
+| 6 | `python3 references/run-hours/scripts/runhours_build.py runhours runhours/history-*.json` | `agg.json`, `days.csv`; prints the notes |
+| 7 | `python3 references/run-hours/scripts/render_runhours.py runhours/agg.json runhours` | the HTML, named `<site>-run-hours-<dates>.html` |
 
 - **Printed calls are complete**: each carries its `query_name`, `args` and `fields`, already checked against the schema. Make it exactly as printed, with no describe step first and nothing added; `platform.history` takes no `limit` or `start_index`.
 - **Discovery is one row per unit with its points nested**, names, level and zone included, not a list of metadata ids: the rules in `run-hours-signals.md` sort points by name, so metadata PEAK adds later is picked up without an edit. A unit's name, type, level and zone travel once rather than on every point. A page holds 1,000 units; where `discovery-0.json`'s `pagination.total` is over that, make the call again for each further page, in parallel, with `start_index` 1000, 2000, …, saved as `discovery-1000.json`, `discovery-2000.json`, …. Units with no points come back too, so plant never integrated is counted in the notes.
 - **The census is two counts**: every unit at the site, and units of a type the two tables know, each `limit: 1` so only `pagination.total` matters (~200 bytes each). Between them the two tables list every equipment type in PEAK's catalogue, so equal counts mean every unit is of a known type; a difference means PEAK has added a type, and the notes say how many units it covers.
 - **History**: the plan packs ~36 points per call, ~1.6 MB. The binding limit is payload size, not the 30 s timeout: past ~2 MB the gateway hard-fails with a 5xx — split the call's `fav_ids` into two calls and save both halves (`history-1-2a.json`, `history-1-2b.json`).
 - **Loading**: the scripts absorb every payload shape and filter to their own `fav_ids`, because the tool-results directory is shared across concurrent sessions. Never print raw rows or "sample" elements: one careless print puts the whole blob in context.
-- **Nothing to draw** — the plan prints no history calls — stop there and say why, as the plan does: either no plant carries a sensor that shows running (with the summary and any unclassified types), or none of the units with one logged anything all week, which is the site's data feed down, not the plant. For the second the plan prints one latest-reading call over a sample of the units' points, a type at a time; it returns a single row, the newest reading of any of them. Save it as `last-reading.json` and run `python3 scripts/runhours_plan.py last runhours runhours/last-reading.json`, which says in site local time when the site last reported, or that none of the points ever has. No empty view.
+- **Nothing to draw** — the plan prints no history calls — stop there and say why, as the plan does: either no plant carries a sensor that shows running (with the summary and any unclassified types), or none of the units with one logged anything all week, which is the site's data feed down, not the plant. For the second the plan prints one latest-reading call over a sample of the units' points, a type at a time; it returns a single row, the newest reading of any of them. Save it as `last-reading.json` and run `python3 references/run-hours/scripts/runhours_plan.py last runhours runhours/last-reading.json`, which says in site local time when the site last reported, or that none of the points ever has. No empty view.
 
 ## Which point draws the row
 
@@ -100,7 +100,7 @@ The build step prints them, in this order; state them under the view. Each list 
 - Mistyped units regrouped, counting drawn units only; Common pairs left out.
 - What was not drawn and why, one line each, for both passes, since none of it needs history: only an enable or schedule; plant alarms but no run point (named — plant whose running is not integrated); no history this week; no points in PEAK; shared COMMON records; records with only sensors, setpoints or dampers (counted, most are zone records).
 - Equipment types the reference does not cover yet.
-- The later pass not yet fetched, by type and unit count. Offer it in one line: on yes, `python3 scripts/runhours_plan.py calls runhours` prints its calls and their files (`history-2-1.json`, …); pull them, re-run the build over every history file of both passes, `python3 scripts/runhours_build.py runhours runhours/history-*.json --pass 2`, and render again. The later pass rewrites `agg.json`, `days.csv` and the HTML with every unit.
+- The later pass not yet fetched, by type and unit count. Offer it in one line: on yes, `python3 references/run-hours/scripts/runhours_plan.py calls runhours` prints its calls and their files (`history-2-1.json`, …); pull them, re-run the build over every history file of both passes, `python3 references/run-hours/scripts/runhours_build.py runhours runhours/history-*.json --pass 2`, and render again. The later pass rewrites `agg.json`, `days.csv` and the HTML with every unit.
 
 Follow-ups — a single unit, a weekday or weekend view, run-hour totals — re-script from `days.csv` and the files on disk. Never re-pull the same window.
 
@@ -123,7 +123,7 @@ runhours_plan.py last     → when the site last reported
 
 ## Aggregate schema
 
-`scripts/render_runhours.py` is the only consumer. A hand-rolled view should target the same shape. Slots are 15-minute steps from Monday 00:00 local, 0 to 672, as `[start, end)`.
+`references/run-hours/scripts/render_runhours.py` is the only consumer. A hand-rolled view should target the same shape. Slots are 15-minute steps from Monday 00:00 local, 0 to 672, as `[start, end)`.
 
 ```json
 {
