@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Load offloaded PEAK point history for the run-hours check.
+"""Load offloaded PEAK responses for the run-hours check.
 
-Not a general history loader — this reads `platform.history` results that the
-platform offloaded to disk for the run-hours check only, keyed on BACnet
-favourite ids. The other health-check reports do not use it.
+Not a general history loader — this reads the `platform.history` results that
+the platform offloaded to disk for the run-hours check only, keyed on BACnet
+favourite ids, plus the discovery pages the plan reads. The other health-check
+reports do not use it.
 
 Two hazards it exists to handle, both of which corrupt results silently:
 
@@ -15,8 +16,9 @@ Two hazards it exists to handle, both of which corrupt results silently:
 
 Usage as a library (the normal case)::
 
-    from runhours_history import load_rows
-    rows = load_rows(paths, fav_ids)
+    from runhours_history import load_rows, read_results
+    rows = load_rows(paths, fav_ids)     # history, filtered to your fav_ids
+    rows = read_results(path)            # any saved response, unfiltered
 
 Usage as a CLI, for a sanity check that prints only derived counts::
 
@@ -28,18 +30,21 @@ runs wherever the skill is unpacked.
 import json
 import sys
 
-__all__ = ["load_rows", "summarise"]
+__all__ = ["load_rows", "read_page", "read_results", "summarise"]
 
 
 def _unwrap(obj):
-    """Reduce any of the known payload shapes to a list of row dicts."""
+    """Reduce any of the known payload shapes to (row dicts, pagination total or None)."""
+    total = None
     for _ in range(4):                      # bounded: shapes nest at most twice
         if isinstance(obj, list):
             if obj and isinstance(obj[0], dict) and "text" in obj[0]:
                 obj = json.loads(obj[0]["text"])     # MCP text-block wrapper
                 continue
-            return obj                                # bare list of rows
+            return obj, total                         # bare list of rows
         if isinstance(obj, dict):
+            if total is None and isinstance(obj.get("pagination"), dict):
+                total = obj["pagination"].get("total")
             if "results" in obj:
                 obj = obj["results"]                  # bare {"results": [...]}
                 continue
@@ -48,17 +53,37 @@ def _unwrap(obj):
                 continue
         break
     if isinstance(obj, list):
-        return obj
+        return obj, total
     raise ValueError(f"unrecognised history payload shape: {type(obj).__name__}")
+
+
+def read_page(path):
+    """Return (rows, total) for one saved response, whatever its wrapper.
+
+    `total` is the response's `pagination.total` where the MCP reported one —
+    a `limit: 1` call is a count — and None otherwise. Raises on a file that
+    cannot be read or parsed rather than returning nothing: a silently empty
+    page would drop equipment or understate run hours, which is worse than
+    failing loudly.
+    """
+    try:
+        with open(path) as fh:
+            payload = json.load(fh)
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"could not read response file {path}: {exc}") from exc
+    return _unwrap(payload)
+
+
+def read_results(path):
+    """Return the result rows of one saved response, whatever its wrapper."""
+    return read_page(path)[0]
 
 
 def load_rows(paths, fav_ids):
     """Return de-duplicated history rows for `fav_ids` across `paths`.
 
     Filters to your own fav_ids and de-dups on (fav_id, ts) across files, so
-    passing extra or overlapping files is safe. Raises on a file that cannot be
-    read or parsed rather than skipping it — a silently dropped chunk would
-    understate run hours, which is worse than failing loudly.
+    passing extra or overlapping files is safe.
     """
     if isinstance(paths, (str, bytes)):
         paths = [paths]
@@ -68,12 +93,7 @@ def load_rows(paths, fav_ids):
 
     kept = {}
     for path in paths:
-        try:
-            with open(path) as fh:
-                payload = json.load(fh)
-        except (OSError, ValueError) as exc:
-            raise ValueError(f"could not read history file {path}: {exc}") from exc
-        for row in _unwrap(payload):
+        for row in read_results(path):
             if not isinstance(row, dict):
                 continue
             fid = str(row.get("fav_id"))
