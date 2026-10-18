@@ -44,9 +44,9 @@ Band heatmap: one row per equipment type, months as columns, each score cell fil
 
 ## Links
 
-Row label, over the full window — the relative picker, not dates, so the dashboard lands on the same four months the grid shows:
+Row label, over the full window — the same dates as the grid, so the dashboard opens on the four months the reader is looking at, whenever the link is followed:
 
-`https://ace.cimenviro.com/dashboard/equipment-health?site_ids={site_id}&relative_date=last_3_months&include_today=true&equipment_type_ids={metadata_type_id}`
+`https://ace.cimenviro.com/dashboard/equipment-health?site_ids={site_id}&start_date={window_start}T00:00:00.000&end_date={today}T00:00:00.000&equipment_type_ids={metadata_type_id}`
 
 `metadata_type_id` is the row's own id, as the scores call returned it. The Site row uses the same URL without `equipment_type_ids`.
 
