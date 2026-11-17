@@ -6,8 +6,8 @@ In this file, a **reading** is a status, speed, frequency, current, power, load,
 
 ## How run hours are worked out
 
-1. **Fetch.** Fetch every metadata listed for the unit's equipment type that the unit has, in [Central plant](#central-plant), [Field units](#field-units) and [Only when the main metadata did not change](#only-when-the-main-metadata-did-not-change). For heating plant with no leaving water temperature of its own, also fetch the leaving water temperature listed for its type from the plant's shared record, the record of the same equipment type with Common in its name. If the site has more than one such record for the type, none is used.
-2. **Count.** Metadata under [Only when the main metadata did not change](#only-when-the-main-metadata-did-not-change) is used only if none of the unit's readings in [Central plant](#central-plant) or [Field units](#field-units) changed during the week. For each metadata used, find the 15-minute periods in the week in which it shows running, as defined in [When a metadata shows running](#when-a-metadata-shows-running).
+1. **Fetch.** Fetch every metadata listed for the unit's equipment type that the unit has, in [Central plant](#central-plant) or [Field units](#field-units). For heating plant with no leaving water temperature of its own, also fetch the leaving water temperature listed for its type from the plant's shared record, the record of the same equipment type with Common in its name. If the site has more than one such record for the type, none is used.
+2. **Count.** For each metadata, find the 15-minute periods in the week in which it shows running, as defined in [When a metadata shows running](#when-a-metadata-shows-running).
 3. **Take the lowest.** The unit is drawn from the metadata with the fewest running periods. Every listed metadata reads running whenever the equipment runs, so the equipment ran no longer than its lowest metadata shows.
 4. **Leave out a reading stuck at off.** A reading that is off or zero all week is left out while another reading of the unit changes during the week. Otherwise it would always be the lowest, although the unit's other readings show it switching on and off.
 5. **Temperatures only alongside a reading.** A temperature is used only for a unit that also has at least one reading. It can lower the run hours but is never the only metadata used. Its changes do not count for step 4, because it follows the water loop, which other units also heat.
@@ -34,7 +34,7 @@ A metadata name with a unit in brackets, such as (MSV), (Hz), (RPM), (Fahrenheit
 
 ## Metadata to fetch
 
-A metadata belongs in an equipment type's list only if it reads running at every time the equipment runs. Compressor metadata does not, because the compressor cycles while the unit runs. This covers compressor metadata on fan units, a chiller's Compressor Status, and one stage of a multi-compressor chiller (names starting Chiller Compressor). Metadata for a second fan or pump that can stop while the unit runs goes under [Only when the main metadata did not change](#only-when-the-main-metadata-did-not-change). A unit with FCU in its name is treated as a Fan Coil Unit, whatever its equipment type in PEAK.
+A metadata belongs in an equipment type's list only if it reads running at every time the equipment runs. Compressor metadata does not, because the compressor cycles while the unit runs. This covers compressor metadata on fan units, a chiller's Compressor Status, and one stage of a multi-compressor chiller (names starting Chiller Compressor). Neither does metadata for a second fan or pump that can stop while the unit runs, such as an air handling unit's return fan. A unit with FCU in its name is treated as a Fan Coil Unit, whatever its equipment type in PEAK.
 
 To add a metadata, put its exact PEAK name in its equipment type's row, after checking in a PEAK chart that it reads running at every time the equipment runs.
 
@@ -88,16 +88,6 @@ To add a metadata, put its exact PEAK name in its equipment type's row, after ch
 | Unit Heater | UH | Unit Heater Fan Current · Unit Heater Fan Status |
 | Air Cooled Condensers | ACC | Condenser Unit Status |
 | Variable Refrigerant Flow Systems | VRF | VRF Outdoor Unit Power · VRF Outdoor Unit Status · VRF Unit Fan Speed · VRF Unit Fan Status |
-
-## Only when the main metadata did not change
-
-These metadata are fetched, but used only when none of the unit's readings in [Central plant](#central-plant) or [Field units](#field-units) changed during the week, including when the unit has none of them.
-
-| Equipment type | Short code | Metadata to fetch | Why not in the main list |
-| --- | --- | --- | --- |
-| Air Handling Units | AHU | Unit Return Air Fan Status · Unit Return Air Fan Speed · Unit Return Air Fan Frequency · Unit Return Air Fan Speed Hz · Unit Return Air Fan Current · Unit Return Air Fan Power · Unit Return Air Fan Speed RPM · Unit Return Air Flow Status · Unit Return Air Velocity | The return fan can stop while the supply fan runs |
-| Calorifier | CAL | Calorifier Domestic Hot Water Pump Status | The hot water pump can run while the calorifier is not heating |
-| Unit Heater | UH | Unit Heater Fan Output | The output is the speed asked of the fan, not a reading from it |
 
 ## Runs around the clock
 

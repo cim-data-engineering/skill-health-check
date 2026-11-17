@@ -258,16 +258,12 @@ def decide(unit, points):
 
     The unit is drawn from the metadata with the fewest running periods. A reading off or zero
     all week is left out while another reading changes. A temperature is used only alongside a
-    reading, and its changes do not make a stuck-off reading be left out. Fallback metadata counts
-    only when none of the main ones changed. When nothing changed: all off is drawn off, all on is
-    drawn on (unverified), a mix has no reliable data.
+    reading, and its changes do not make a stuck-off reading be left out. When nothing changed:
+    all off is drawn off, all on is drawn on (unverified), a mix has no reliable data.
     """
     got = [(p, points.get(str(p["fav_id"]))) for p in unit["pull"]]
     got = [(p, r) for p, r in got if r]
     reads = [(p, r) for p, r in got if p["role"] != "temp"]
-    main = [(p, r) for p, r in reads if not p.get("fallback")]
-    if any(not r["stuck"] for _, r in main):
-        reads = main                         # fallback metadata only when the main ones did not change
     temps = [(p, r) for p, r in got if p["role"] == "temp"] if reads else []
     if not reads:
         return Row(nodata="No data this week")

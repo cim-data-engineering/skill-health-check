@@ -38,7 +38,6 @@ Work in one directory, e.g. `runhours/`. Every call's response is saved to a fil
 [run-hours-signals.md](run-hours-signals.md) holds the rules, in business terms an engineer can check: the metadata to fetch for each equipment type, how each counts as running, and how the row is chosen. In short:
 
 - The row is drawn from the metadata that shows the fewest running hours.
-- Metadata under [Only when the main metadata did not change](run-hours-signals.md#only-when-the-main-metadata-did-not-change) (an AHU's return fan, a calorifier's hot water pump, a unit heater's fan output) is fetched for every unit but used only when none of the unit's main readings changed during the week.
 - A reading off or zero all week is left out while another reading of the unit changes.
 - A leaving water temperature is used only alongside a reading, and its changes do not count when deciding whether a reading is left out.
 - When none of the unit's metadata changed all week:

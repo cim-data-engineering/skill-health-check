@@ -49,7 +49,6 @@ DEFAULT_HOST    = "https://ace.cimenviro.com"
 PAGE_ORDER      = ["Central plant", "Field units", "Other"]
 DAY_KEYS        = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 DAY_ABBR        = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-FALLBACK_RANK   = 1000   # list position from which a metadata is a fallback (see Rules.FALLBACK)
 NUMBERED        = re.compile(r"([A-Z]*)0*(\d+)([A-Z]*)")    # 'P01A' -> P, 1, A; '10' -> '', 10, ''
 
 
@@ -131,7 +130,6 @@ class Rules:
     """The tables of references/run-hours/run-hours-signals.md: equipment types and the metadata to fetch."""
 
     NEEDED = ("Central plant", "Field units", "Runs around the clock")
-    FALLBACK = "Only when the main metadata did not change"
 
     def __init__(self, path=SIGNALS):
         tables = read_tables(path)
@@ -150,22 +148,12 @@ class Rules:
                 self.types[code] = {"code": code, "name": row["Equipment type"], "order": order, "page": page}
                 self.lists[code] = {base_name(n): i for i, n in enumerate(names)}
                 order += 1
-        for row in tables.get(self.FALLBACK, []):
-            code = row.get("Short code", "").strip()
-            if code not in self.types:
-                raise ValueError(f"{Path(path).name}: '{self.FALLBACK}' names an unknown short code: {code!r}")
-            names = [n.strip() for n in (row.get("Metadata to fetch") or "").split("·") if n.strip()]
-            for i, n in enumerate(names):
-                self.lists[code].setdefault(base_name(n), FALLBACK_RANK + i)
         clock = tables["Runs around the clock"]
         self.clock_codes = {c for row in clock for c in _split(row["Short codes"])}
         self.clock_words = [_phrase(p) for row in clock for p in _split(row["Name or zone contains"])]
 
     def classify(self, name, *type_codes):
-        """(role, rank key, speed state?) when the name is listed for one of these types, else None.
-
-        A rank of FALLBACK_RANK or more is a fallback metadata, used only when the main ones did not change.
-        """
+        """(role, rank key, speed state?) when the name is listed for one of these types, else None."""
         b = base_name(name)
         for code in type_codes:
             rank = self.lists.get(code, {}).get(b)
@@ -452,8 +440,7 @@ def pick_points(unit, rules):
     unit["temps"] = [{"fav_id": c["fav_id"], "name": c["name"], "role": "temp"} for c in pull if c["role"] == "temp"]
     if not any(c["role"] in SENSOR_ROLES for c in pull):
         pull = []                                  # a temperature is never the only metadata used
-    unit["pull"] = [dict({k: c[k] for k in ("fav_id", "name", "role")}, **({"state": True} if c["state"] else {}),
-                         **({"fallback": True} if c["key"][0] >= FALLBACK_RANK else {}))
+    unit["pull"] = [dict({k: c[k] for k in ("fav_id", "name", "role")}, **({"state": True} if c["state"] else {}))
                     for c in pull]
     if pull:
         return
