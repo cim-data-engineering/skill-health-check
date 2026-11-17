@@ -2,19 +2,18 @@
 """Plan a run-hours pull: which week, which points, and in what order.
 
 Usage:
-    python3 runhours_plan.py window <site.json> <workdir> [--week-of YYYY-MM-DD] [--include LT,...]
+    python3 runhours_plan.py window <site.json> <workdir> [--week-of YYYY-MM-DD]
                                     [--hours "Mon-Fri 08:00-18:00, Sat 09:00-13:00"]
-    python3 runhours_plan.py plan <workdir> <discovery.json> [more.json ...] [--census census.json ...] [--cap N]
+    python3 runhours_plan.py plan <workdir> <discovery.json> [more.json ...] [--cap N]
     python3 runhours_plan.py calls <workdir> [--pass 2]
     python3 runhours_plan.py last <workdir> <last-reading.json>
 
 window  Reads the saved search_sites result (timezone and working hours), fixes
         the last full Monday-to-Sunday week in site local time, writes
-        <workdir>/window.json and prints the discovery and census calls to make.
+        <workdir>/window.json and prints the discovery call to make.
         --hours assesses against the user's hours instead of the site's.
-plan    Sorts every discovered point with the rules in
-        references/run-hours/run-hours-signals.md, picks each unit's
-        candidate points, orders the units for the view, splits them into a
+plan    Keeps each unit's metadata listed for its equipment type in
+        references/run-hours/run-hours-signals.md, orders the units for the view, splits them into a
         first pass of up to --cap units and the rest, writes
         <workdir>/plan.json and prints the history calls to make.
 calls   Prints the history calls for the later pass, once the user asks for it.
@@ -48,10 +47,9 @@ PROBE_POINTS    = 20     # points asked for the latest reading when nothing logg
 HISTORY_FIELDS  = ["fav_id", "ts", "data"]
 DEFAULT_HOST    = "https://ace.cimenviro.com"
 PAGE_ORDER      = ["Central plant", "Field units", "Other"]
-ROLE_ORDER      = ["status", "analog", "command", "compressor"]
-TRAILING_UNITS  = {"%", "percent", "w", "kw", "v", "a", "msv"}
 DAY_KEYS        = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 DAY_ABBR        = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+FALLBACK_RANK   = 1000   # list position from which a metadata is a fallback (see Rules.FALLBACK)
 NUMBERED        = re.compile(r"([A-Z]*)0*(\d+)([A-Z]*)")    # 'P01A' -> P, 1, A; '10' -> '', 10, ''
 
 
@@ -85,23 +83,10 @@ def _split(cell):
     return [p.strip() for p in (cell or "").split(",") if p.strip()]
 
 
-def _yes(cell):
-    return (cell or "").strip().lower() == "yes"
-
-
 def _phrase(text):
-    """Whole-word, case-insensitive matcher for one phrase."""
-    return re.compile(r"(?<![a-z0-9])" + re.escape(text.lower()) + r"(?![a-z0-9])")
-
-
-def normalise(name):
-    """Lower-case name without brackets or a trailing unit, and whether it is (MSV)."""
-    low = name.lower()
-    msv = "(msv)" in low
-    tokens = re.sub(r"\([^)]*\)", " ", low).split()
-    while tokens and tokens[-1] in TRAILING_UNITS:
-        tokens.pop()
-    return " ".join(tokens), msv
+    """Whole-word, case-insensitive matcher for one phrase; a space also matches - or _."""
+    words = [re.escape(w) for w in text.lower().split()]
+    return re.compile(r"(?<![a-z0-9])" + r"[\s_-]+".join(words) + r"(?![a-z0-9])")
 
 
 def name_tokens(name):
@@ -121,123 +106,85 @@ def plural(n, word):
     return f"{n} {word}" + ("" if n == 1 else "s")
 
 
-class Rules:
-    """The tables of references/run-hours/run-hours-signals.md, ready to classify with."""
+UNIT_SUFFIX = re.compile(r"\s*\((?:msv|hz|rpm|%|v|a|kw|fahrenheit|ft/min)\)\s*$|\s+%$", re.I)
 
-    NEEDED = ("Equipment types", "Regrouped by name", "Never charted", "Roles",
-              "Never a run signal", "Which point wins", "Runs around the clock")
+
+def base_name(name):
+    """The metadata name without a unit in brackets: 'Supply Air Fan Speed (Hz)' -> 'Supply Air Fan Speed'."""
+    prev, n = None, (name or "").strip()
+    while prev != n:
+        prev, n = n, UNIT_SUFFIX.sub("", n).strip()
+    return n
+
+
+def metadata_role(name):
+    """'temp' for a leaving water temperature, 'status' for a status (or a speed state), else 'analog'."""
+    b = base_name(name).lower()
+    if b.endswith("temperature"):
+        return "temp"
+    if re.search(r"(status|running)$", b) or "(msv)" in (name or "").lower():
+        return "status"
+    return "analog"
+
+
+class Rules:
+    """The tables of references/run-hours/run-hours-signals.md: equipment types and the metadata to fetch."""
+
+    NEEDED = ("Central plant", "Field units", "Runs around the clock")
+    FALLBACK = "Only when the main metadata did not change"
 
     def __init__(self, path=SIGNALS):
         tables = read_tables(path)
         missing = [h for h in self.NEEDED if h not in tables]
         if missing:
             raise ValueError(f"{Path(path).name}: no table under '## {missing[0]}'")
-        self.types = {}
-        for order, row in enumerate(tables["Equipment types"]):
-            self.types[row["Code"]] = {
-                "code": row["Code"], "name": row["Equipment type"], "order": order,
-                "page": row["Page"], "system": row["System"],
-                "words": [p.upper() for p in _split(row["Name word"])],
-                "flags": {col for col, cell in row.items() if _yes(cell)},   # 'Compressor is the unit', ...
-                "also_never": [_phrase(p) for p in _split(row["Also never"])],
-            }
-        columns = set(tables["Equipment types"][0]) if tables["Equipment types"] else set()
-        self.regroup_from = {row["Code"]: set(_split(row["Takes units PEAK types as"]))
-                             for row in tables["Regrouped by name"]}
-        self.never_charted = {c for row in tables["Never charted"] for c in _split(row["Codes"])}
-        self.endings = {row["Role"]: [e.lower() for e in _split(row["Name ends with, best first"])]
-                        for row in tables["Roles"]}
-        self.never, self.marks_plant = [], []
-        for row in tables["Never a run signal"]:
-            exempt = (row.get("Except where") or "").strip() or None
-            if exempt and exempt not in columns:
-                raise ValueError(f"Never a run signal: 'Except where' names no Equipment types "
-                                 f"column: {exempt}")
-            for p in _split(row["Name contains"]):
-                self.never.append((_phrase(p), exempt))
-                if _yes(row.get("Marks plant")):
-                    self.marks_plant.append(_phrase(p))
-        self.components = [(len(p), int(row["Rank"]), _phrase(p))
-                           for row in tables["Which point wins"]
-                           for p in _split(row["Component named"]) if not p.startswith("(")]
-        self.by_word = {w: code for code, ty in self.types.items() for w in ty["words"]}
-        self.compressor = _phrase("compressor")
+        self.types, self.lists, order = {}, {}, 0
+        for page in ("Central plant", "Field units"):
+            for row in tables[page]:
+                code = row.get("Short code", "").strip()
+                if not code or code in self.types:
+                    raise ValueError(f"{Path(path).name}: '{page}' has a missing or repeated short code: {code!r}")
+                names = [n.strip() for n in (row.get("Metadata to fetch") or "").split("·") if n.strip()]
+                if not names:
+                    raise ValueError(f"{Path(path).name}: {code} lists no metadata")
+                self.types[code] = {"code": code, "name": row["Equipment type"], "order": order, "page": page}
+                self.lists[code] = {base_name(n): i for i, n in enumerate(names)}
+                order += 1
+        for row in tables.get(self.FALLBACK, []):
+            code = row.get("Short code", "").strip()
+            if code not in self.types:
+                raise ValueError(f"{Path(path).name}: '{self.FALLBACK}' names an unknown short code: {code!r}")
+            names = [n.strip() for n in (row.get("Metadata to fetch") or "").split("·") if n.strip()]
+            for i, n in enumerate(names):
+                self.lists[code].setdefault(base_name(n), FALLBACK_RANK + i)
         clock = tables["Runs around the clock"]
-        self.clock_codes = {c for row in clock for c in _split(row["Codes"])}
+        self.clock_codes = {c for row in clock for c in _split(row["Short codes"])}
         self.clock_words = [_phrase(p) for row in clock for p in _split(row["Name or zone contains"])]
 
-    def classify(self, name, type_code):
-        """(role, rank key, speed state?) for a point name on this type, or None if no run signal."""
-        n, msv = normalise(name)
-        ty = self.types.get(type_code, {})
-        flags = ty.get("flags", set())
-        if any(rx.search(n) for rx, exempt in self.never if exempt not in flags) \
-                or any(p.search(n) for p in ty.get("also_never", [])):
-            return None
-        # A point only this type's exception lets through — a boiler's burner status — is
-        # its last resort: the boiler's own status beside it still decides the row.
-        excepted = any(rx.search(n) for rx, exempt in self.never if exempt)
-        match = None
-        for role, ends in self.endings.items():
-            for pos, end in enumerate(ends):
-                if (n == end or n.endswith(" " + end)) and (match is None or len(end) > len(match[2])):
-                    match = (role, pos, end)
-        if not match:
-            return None
-        role, pos, end = match
-        rank = self.component_rank(n)
-        if end in ("load", "output") and rank != 2:
-            return None                  # a coil's or a system's load, not the unit's
-        state = msv and role == "analog"
-        if state:
-            role, pos = "status", 0      # an (MSV) speed is a state: off, low, high
-        if self.compressor.search(n) and "Compressor is the unit" not in flags:
-            if role != "status":
-                return None
-            role = "compressor"
-        weaker = end in ("occupancy", "load", "output") or excepted   # a schedule, an indirect measure
-        return role, (int(weaker), rank, pos, int(msv), len(n)), state
+    def classify(self, name, *type_codes):
+        """(role, rank key, speed state?) when the name is listed for one of these types, else None.
 
-    def component_rank(self, n):
-        """Rank of the most specific component phrase in the name; 2 when none."""
-        hits = [(length, rank) for length, rank, rx in self.components if rx.search(n)]
-        if not hits:
-            return 2
-        longest = max(length for length, _ in hits)
-        return max(rank for length, rank in hits if length == longest)
-
-    def is_plant(self, point_names):
-        """Whether any point reports a plant alarm or filter — plant whose running is not mapped."""
-        return any(rx.search(normalise(n)[0]) for n in point_names for rx in self.marks_plant)
+        A rank of FALLBACK_RANK or more is a fallback metadata, used only when the main ones did not change.
+        """
+        b = base_name(name)
+        for code in type_codes:
+            rank = self.lists.get(code, {}).get(b)
+            if rank is not None:
+                role = metadata_role(name)
+                state = role == "status" and "(msv)" in name.lower() and "speed" in name.lower()
+                return role, (rank, len(name)), state
+        return None
 
     def runs_around_the_clock(self, unit):
-        """Whether the unit serves a space conditioned day and night, so running all week is its job."""
         if {unit["peak_type"], unit["type"]} & self.clock_codes:
             return True
         text = " ".join((unit.get(k) or "").lower() for k in ("name", "zone"))
         return any(rx.search(text) for rx in self.clock_words)
 
     def charted_type(self, equipment_name, peak_type):
-        """The type a unit is drawn under: its name's, where Regrouped by name allows the pair.
-
-        A name that names PEAK's own type anywhere keeps it ('CH AHU-12' is an
-        AHU). Otherwise the first name word whose type may take PEAK's decides
-        ('B2 FCU PLANT-ROOM' typed AHU is a fan coil); a location code such as the
-        'CH' or 'EC' opening a name is passed over, since no row lets a chiller take
-        an AHU or an evaporative cooler take a boiler.
-        """
-        words = [self.name_word(tok) for tok in name_tokens(equipment_name)]
-        if peak_type in words:
-            return peak_type
-        return next((w for w in words if w and peak_type in self.regroup_from.get(w, ())), peak_type)
-
-    def name_word(self, tok):
-        """The type a name token means, if any: 'FCU', or 'KEF11' glued to its number."""
-        code = self.by_word.get(tok)
-        if not code:
-            glued = re.fullmatch(r"([A-Z]+)\d+", tok)
-            code = self.by_word.get(glued.group(1)) if glued else None
-        return code
+        """A unit with FCU in its name is a Fan Coil Unit, whatever its type in PEAK."""
+        fcu = any(t == "FCU" or re.fullmatch(r"FCU\d+", t) for t in name_tokens(equipment_name))
+        return "FCU" if fcu and "FCU" in self.types else peak_type
 
 
 # ---- window ------------------------------------------------------------------
@@ -310,10 +257,30 @@ def week_label(days):
     return f"{head} to Sun {last.day} {last:%b} {last.year}"
 
 
+TZ_ALIAS = {   # legacy time-zone names PEAK sites carry, read as the zone they link to
+    "Australia/ACT": "Australia/Sydney", "Australia/Canberra": "Australia/Sydney",
+    "Australia/NSW": "Australia/Sydney", "Australia/North": "Australia/Darwin",
+    "Australia/Queensland": "Australia/Brisbane", "Australia/South": "Australia/Adelaide",
+    "Australia/Tasmania": "Australia/Hobart", "Australia/Victoria": "Australia/Melbourne",
+    "Australia/West": "Australia/Perth", "Australia/Yancowinna": "Australia/Broken_Hill",
+    "Australia/LHI": "Australia/Lord_Howe",
+    "US/Eastern": "America/New_York", "US/Central": "America/Chicago", "US/Mountain": "America/Denver",
+    "US/Pacific": "America/Los_Angeles", "US/Arizona": "America/Phoenix", "US/Alaska": "America/Anchorage",
+    "US/Hawaii": "Pacific/Honolulu", "US/East-Indiana": "America/Indiana/Indianapolis",
+    "US/Michigan": "America/Detroit",
+    "Canada/Eastern": "America/Toronto", "Canada/Central": "America/Winnipeg",
+    "Canada/Mountain": "America/Edmonton", "Canada/Pacific": "America/Vancouver",
+    "Canada/Atlantic": "America/Halifax", "Canada/Newfoundland": "America/St_Johns",
+    "GB": "Europe/London", "GB-Eire": "Europe/London", "Eire": "Europe/Dublin", "NZ": "Pacific/Auckland",
+    "Singapore": "Asia/Singapore", "Hongkong": "Asia/Hong_Kong", "PRC": "Asia/Shanghai", "Japan": "Asia/Tokyo",
+    "Brazil/East": "America/Sao_Paulo",
+}
+
+
 def cmd_window(args):
     from zoneinfo import ZoneInfo           # stdlib from 3.9; needs the system tz database
     site = load_site(args.site)
-    tz = ZoneInfo(site["timezone"])
+    tz = ZoneInfo(TZ_ALIAS.get(site["timezone"], site["timezone"]))
     work = Path(args.workdir)
     work.mkdir(parents=True, exist_ok=True)
 
@@ -342,10 +309,9 @@ def cmd_window(args):
 
     names = sorted({datetime.combine(d, time(12), tzinfo=tz).tzname() for d in dates})
     link = re.match(r"https?://[^/]+", site.get("site_link") or "")
-    include = [c.strip() for c in (args.include or "").split(",") if c.strip()]
     window = {
         "site_id": site["site_id"], "site_name": site["site_name"],
-        "timezone": site["timezone"], "tz_label": "/".join(names),
+        "timezone": TZ_ALIAS.get(site["timezone"], site["timezone"]), "tz_label": "/".join(names),
         "hours_source": hours_source,
         "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"), "end": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "link_start": start.strftime("%Y-%m-%dT%H:%M:%S.000"),
@@ -354,13 +320,12 @@ def cmd_window(args):
         "label": week_label(dates),
         "days": [{"date": d.isoformat(), "label": f"{DAY_ABBR[i]} {d.day}", "wh": slots[i]}
                  for i, d in enumerate(dates)],
-        "include": include,
     }
     (work / "window.json").write_text(json.dumps(window, indent=1))
 
     rules = Rules()
-    charted = list(rules.types) + [c for c in include if c not in rules.types]
-    known = charted + sorted(c for c in rules.never_charted if c not in charted)
+    charted = list(rules.types)
+
     # One row per unit of an in-scope type, its points nested: the unit's name, type
     # and level travel once rather than on every point.
     discovery = {
@@ -374,24 +339,16 @@ def cmd_window(args):
                        {"path": "history_available",
                         "args": {"start": window["start"], "end": window["end"], "end_exclusive": True}}]}],
     }
-    # Two counts: every unit, and units of a type the tables know. Equal counts mean
-    # no unit is of a type PEAK added after the tables were written.
-    census = [{"query_name": "platform.equipment",
-               "args": {"site_id": site["site_id"], "is_active": True, **extra, "limit": 1},
-               "fields": ["equipment_id"]}
-              for extra in ({}, {"metadata_type_codes": known})]
     print(f"{site['site_name']}: {window['label']} ({window['tz_label']}), "
           f"{window['start']} to {window['end']} UTC. Wrote {work / 'window.json'}.")
-    print("Three calls, in parallel, each exactly as printed. Save the responses in "
+    print("One call, exactly as printed. Save the response in "
           f"{work} under the names given.")
     print(f"Discovery -> discovery-0.json. Where its pagination.total is over {DISCOVERY_LIMIT}, "
           f"make the same call again for each further page, in parallel, with start_index "
           f"{DISCOVERY_LIMIT}, {2 * DISCOVERY_LIMIT}, ... -> discovery-{DISCOVERY_LIMIT}.json, "
           f"discovery-{2 * DISCOVERY_LIMIT}.json, ...:")
     print(json.dumps(discovery))
-    for name, call in zip(("census-all.json", "census-known.json"), census):
-        print(f"Census count -> {name}:")
-        print(json.dumps(call))
+
 
 
 # ---- plan --------------------------------------------------------------------
@@ -437,7 +394,7 @@ def member_of(unit, words, numbers):
 
 
 def signal_grade(unit):
-    """1 for a status or analog, 0 for a compressor status alone."""
+    """1 for a unit drawn from a status or analog, else 0."""
     return 1 if {p["role"] for p in unit["pull"]} & {"status", "analog"} else 0
 
 
@@ -472,73 +429,63 @@ def read_units(paths):
     return list(units.values())
 
 
-def read_census(paths):
-    """(units per type, type names, units of an unknown type) from the saved census.
-
-    A full census — every unit's type, as older runs saved it — is counted
-    by type and names any unknown type. The MCP's two counts — every
-    unit, and units of a type the tables know, each a pagination.total — give
-    only how many units are of an unknown type, the difference.
-    """
-    counts, names, totals = Counter(), {}, []
-    for path in paths or []:
-        rows, total = read_page(path)
-        if rows and isinstance(rows[0], dict) and "metadata_type" in rows[0]:
-            for row in rows:
-                mt = row.get("metadata_type") or {}
-                counts[mt.get("type_code")] += 1
-                names[mt.get("type_code")] = mt.get("type")
-        elif total is not None:
-            totals.append(int(total))
-        elif rows:
-            raise ValueError(f"{path}: a census response with neither unit types nor a count")
-    if totals and len(totals) != 2:
-        raise ValueError("pass both census counts, every unit and units of a known type")
-    return counts, names, (max(totals) - min(totals)) if totals else None
-
-
-SENSOR_ROLES = ("status", "analog", "compressor")   # a reading of the unit; a command is not
+SENSOR_ROLES = ("status", "analog")   # readings; a temperature is never used on its own
+COMMAND_END = re.compile(r"(enable|command|occupancy)$", re.I)
 
 
 def pick_points(unit, rules):
-    """The points to pull for one unit: its status and analog, else a compressor status.
-
-    Only sensors draw a row. An enable, command or occupancy schedule says what the
-    unit was told to do, not that it ran, so a unit with nothing else is left off
-    the chart and named in the notes.
-    """
-    found = {role: [] for role in ROLE_ORDER}
+    """Every metadata listed for the unit's equipment type that the unit has, with history this week."""
+    found = []
     for p in unit["points"]:
         name = (p.get("metadata") or {}).get("name") or ""
-        hit = rules.classify(name, unit["type"])
+        hit = rules.classify(name, unit["peak_type"], unit["type"])
         if hit:
             role, key, state = hit
-            found[role].append({"fav_id": p["fav_id"], "name": name, "role": role, "key": key,
-                                "state": state, "live": bool(p.get("history_available"))})
-    best = {}
-    for role, cands in found.items():
-        cands.sort(key=lambda c: (c["key"], c["fav_id"]))
-        best[role] = next((c for c in cands if c["live"]), None)
-    pull = [best[r] for r in ("status", "analog") if best[r]] or ([best["compressor"]] if best["compressor"] else [])
-    unit["pull"] = [dict({k: c[k] for k in ("fav_id", "name", "role")}, **({"state": True} if c["state"] else {}))
+            found.append({"fav_id": p["fav_id"], "name": name, "role": role, "key": key, "state": state,
+                          "live": bool(p.get("history_available"))})
+    found.sort(key=lambda c: (c["key"], c["fav_id"]))
+    pull, seen = [], set()
+    for c in found:
+        if c["live"] and base_name(c["name"]) not in seen:
+            seen.add(base_name(c["name"]))
+            pull.append(c)
+    unit["temps"] = [{"fav_id": c["fav_id"], "name": c["name"], "role": "temp"} for c in pull if c["role"] == "temp"]
+    if not any(c["role"] in SENSOR_ROLES for c in pull):
+        pull = []                                  # a temperature is never the only metadata used
+    unit["pull"] = [dict({k: c[k] for k in ("fav_id", "name", "role")}, **({"state": True} if c["state"] else {}),
+                         **({"fallback": True} if c["key"][0] >= FALLBACK_RANK else {}))
                     for c in pull]
     if pull:
         return
-    sensors = [c for r in SENSOR_ROLES for c in found[r]]
-    if sensors:
+    names = [(p.get("metadata") or {}).get("name") or "" for p in unit["points"]]
+    readings = [c for c in found if c["role"] in SENSOR_ROLES]
+    if readings:
         unit["why"] = "no history this week"
-        best = min(sensors, key=lambda c: (c["key"], c["fav_id"]))
+        best = readings[0]
         unit["probe"] = {"fav_id": best["fav_id"], "unit": unit["name"], "point": best["name"]}
     elif not unit["points"]:
         unit["why"] = "no points"
     elif "COMMON" in name_tokens(unit["name"]):
         unit["why"] = "shared record"
-    elif found["command"]:
+    elif unit["temps"]:
+        unit["why"] = "temperature only"
+    elif any(COMMAND_END.search(base_name(n)) for n in names):
         unit["why"] = "command only"
-    elif rules.is_plant((p.get("metadata") or {}).get("name") or "" for p in unit["points"]):
-        unit["why"] = "alarms only"
     else:
-        unit["why"] = "sensors or setpoints only"
+        unit["why"] = "no listed metadata"
+
+
+def borrow_shared_temperature(units):
+    """A heating unit with no leaving water temperature of its own takes its type's Common record's."""
+    for ty in {u["type"] for u in units}:
+        commons = [u for u in units if u["type"] == ty and u.get("temps") and "COMMON" in name_tokens(u["name"])]
+        if len(commons) != 1:
+            continue
+        src, t = commons[0], commons[0]["temps"][0]
+        for u in units:
+            if u is not src and u["type"] == ty and u["pull"] and not any(p["role"] == "temp" for p in u["pull"]):
+                u["pull"].append({"fav_id": t["fav_id"], "name": t["name"], "role": "temp",
+                                  "equipment_id": src["equipment_id"], "shared": src["name"]})
 
 
 def drop_covered_pairs(units):
@@ -580,25 +527,22 @@ def cmd_plan(args):
     work = Path(args.workdir)
     window = json.loads((work / "window.json").read_text())
     rules = Rules()
-    include = set(window.get("include") or [])
-    census, census_names, unknown_units = read_census(args.census)
 
-    units, unknown = [], Counter()
+    units = []
     for unit in read_units(args.discovery):
         peak = unit["peak_type"]
-        if peak not in rules.types and peak not in include:
-            unknown[peak] += 1
-            continue
-        unit["type"] = rules.charted_type(unit["name"], peak) if peak in rules.types else peak
-        ty = rules.types.get(unit["type"])
-        unit["type_name"] = ty["name"] if ty else census_names.get(peak, peak)
-        unit["page"] = ty["page"] if ty else "Other"
+        if peak not in rules.types:
+            continue                       # a type not in the tables is not charted
+        unit["type"] = rules.charted_type(unit["name"], peak)
+        ty = rules.types[unit["type"]]
+        unit["type_name"], unit["page"] = ty["name"], ty["page"]
         if unit["type"] != peak:
             unit["regrouped_from"] = rules.types[peak]["name"]
         unit["around_the_clock"] = rules.runs_around_the_clock(unit)
         pick_points(unit, rules)
         units.append(unit)
     drop_covered_pairs(units)
+    borrow_shared_temperature(units)
 
     def order(u):
         ty = rules.types.get(u["type"])
@@ -609,13 +553,10 @@ def cmd_plan(args):
     assign_passes(units, args.cap if args.cap and args.cap > 0 else None)
     chunks = []
     for pass_no in (1, 2):
-        favs = [p["fav_id"] for u in units if u["pass"] == pass_no for p in u["pull"]]
+        favs = list(dict.fromkeys(p["fav_id"] for u in units if u["pass"] == pass_no for p in u["pull"]))
         chunks += [{"pass": pass_no, "fav_ids": favs[i:i + POINTS_PER_CALL]}
                    for i in range(0, len(favs), POINTS_PER_CALL)]
 
-    # Types in neither table: named in the notes, so a new PEAK type is a visible gap.
-    known = set(rules.types) | rules.never_charted | include | {None}
-    unclassified = Counter({c: n for c, n in (census or unknown).items() if c not in known})
     dead = [u for u in units if u.get("why") == "no history this week"]
     plan = {
         "units": [{k: u.get(k) for k in ("equipment_id", "name", "type", "type_name", "page",
@@ -623,9 +564,6 @@ def cmd_plan(args):
                                           "pass", "pull", "why")}
                   for u in units],
         "chunks": chunks,
-        "unclassified": [{"code": c, "type": census_names.get(c, c), "units": n}
-                         for c, n in unclassified.most_common()],
-        "unknown_units": unknown_units or 0,
         "outage": bool(dead) and not any(u["pull"] for u in units),
         "probe": probe_points(dead) if dead and not chunks else [],
     }
@@ -650,10 +588,10 @@ def probe_points(dead):
     return out
 
 
-WHY_TEXT = {"no history this week": "a run point, but no history this week",
+WHY_TEXT = {"temperature only": "only a temperature, which is never used on its own",
+            "no listed metadata": "none of the metadata listed for its type",
+            "no history this week": "a run point, but no history this week",
             "command only": "only an enable, command or schedule, no sensor",
-            "alarms only": "plant alarms or filters but no run point",
-            "sensors or setpoints only": "only sensors, setpoints or dampers",
             "shared record": "a COMMON record with no sensor of its own",
             "no points": "no points in PEAK",
             "pair point, members charted": "a COMMON pair record whose members are drawn"}
@@ -676,12 +614,6 @@ def print_summary(plan):
                         for u in plan["units"] if u["regrouped_from"] and u["pull"])
     if regrouped:
         print("Regrouped by name: " + ", ".join(f"{k} {n}" for k, n in regrouped.items()) + ".")
-    if plan["unclassified"]:
-        print("Unclassified types at this site: "
-              + ", ".join(f"{u['type']} ({u['code']}) {u['units']}" for u in plan["unclassified"]))
-    if plan["unknown_units"]:
-        print(f"Unclassified: {plural(plan['unknown_units'], 'unit')} of a type neither table in "
-              "run-hours-signals.md covers.")
 
 
 def history_call(args):
@@ -690,7 +622,7 @@ def history_call(args):
 
 def print_nothing_to_draw(window, plan, dead, work):
     if plan["outage"]:
-        print(f"Nothing to draw: none of the {plural(len(dead), 'unit')} with a run point logged any "
+        print(f"Nothing to draw: none of the {plural(len(dead), 'unit')} with listed metadata logged any "
               f"history from {window['start']} to {window['end']}, so the site's data feed looks down. "
               "Say so rather than showing an empty view. To say since when, make this call exactly as "
               f"printed: it returns one row, the newest reading of any of these "
@@ -698,15 +630,15 @@ def print_nothing_to_draw(window, plan, dead, work):
               f"runhours_plan.py last {work} {work / 'last-reading.json'}")
         print(json.dumps(history_call({"fav_ids": [p["fav_id"] for p in plan["probe"]], "latest": True})))
     else:
-        print("Nothing to draw: no plant at the site carries a usable run point. Say so with the "
-              "summary above rather than showing an empty view.")
+        print("Nothing to draw: no unit at the site has the metadata listed for its equipment type in "
+              "run-hours-signals.md. Say so with the summary above rather than showing an empty view.")
 
 
 def print_calls(window, plan, pass_no, work):
     chunks = [c for c in plan["chunks"] if c["pass"] == pass_no]
     label = "first pass" if pass_no == 1 else "later pass"
     if not chunks:
-        print(f"No history calls for the {label}: every unit with a run point is in the other pass.")
+        print(f"No history calls for the {label}: every unit with listed metadata is in the other pass.")
         return
     names = f"history-{pass_no}-1.json" + (f" to history-{pass_no}-{len(chunks)}.json" if len(chunks) > 1 else "")
     print(f"History calls, {label}: {len(chunks)}. Make each exactly as printed, in parallel, and save "
@@ -752,15 +684,12 @@ def main(argv):
     w.add_argument("site", help="saved search_sites result for the site")
     w.add_argument("workdir")
     w.add_argument("--week-of", help="any date in the Monday-to-Sunday week to show")
-    w.add_argument("--include", help="never-charted type codes the user asked for, e.g. LT")
     w.add_argument("--hours", help='the user\'s working hours, e.g. "Mon-Fri 08:00-18:00, Sat 09:00-13:00"; '
                                    "a day not named is closed")
     w.add_argument("--today", help=argparse.SUPPRESS)
     p = sub.add_parser("plan", help="pick points and passes from the discovery pages")
     p.add_argument("workdir")
     p.add_argument("discovery", nargs="+", help="saved discovery pages")
-    p.add_argument("--census", nargs="+", action="extend",
-                   help="the two saved census counts, or a full census")
     p.add_argument("--cap", type=int, default=CAP_UNITS,
                    help=f"first-pass units (default {CAP_UNITS}; 0 fetches everything)")
     c = sub.add_parser("calls", help="print the history calls for one pass of an existing plan")
