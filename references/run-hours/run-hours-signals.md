@@ -2,20 +2,13 @@
 
 For each equipment type, this file lists the PEAK metadata used to work out when a unit was running, and the rules that turn that metadata into the bars on the run hours chart. Equipment types not listed are not included in the run hours view.
 
-In this file, a **reading** is a status, speed, frequency, current, power, load, firing rate or velocity metadata. A **temperature** is a leaving water temperature metadata.
-
 ## How run hours are worked out
 
-1. **Fetch.** Fetch every metadata listed for the unit's equipment type that the unit has, in [Central plant](#central-plant) or [Field units](#field-units). For heating plant with no leaving water temperature of its own, also fetch the leaving water temperature listed for its type from the plant's shared record, the record of the same equipment type with Common in its name. If the site has more than one such record for the type, none is used.
-2. **Count.** For each metadata, find the 15-minute periods in the week in which it shows running, as defined in [When a metadata shows running](#when-a-metadata-shows-running).
-3. **Take the lowest.** The unit is drawn from the metadata with the fewest running periods. Every listed metadata reads running whenever the equipment runs, so the equipment ran no longer than its lowest metadata shows.
-4. **Leave out a reading stuck at off.** A reading that is off or zero all week is left out while another reading of the unit changes during the week. Otherwise it would always be the lowest, although the unit's other readings show it switching on and off.
-5. **Temperatures only alongside a reading.** A temperature is used only for a unit that also has at least one reading. It can lower the run hours but is never the only metadata used. Its changes do not count for step 4, because it follows the water loop, which other units also heat.
-6. **Nothing changed.** If none of the unit's metadata changed all week:
-   - **All off:** the unit is drawn as off for the whole week.
-   - **All on:** the unit is drawn as running for the whole week and listed in the notes as unverified.
-   - **Some on, some off:** the unit is shown as having no reliable data.
-7. **No enables or commands.** Metadata whose name ends in Enable, Command or Occupancy is not fetched, because it records whether the unit was allowed to run, not whether it ran.
+1. **Fetch** the metadata the unit has from its equipment type's row in [Central plant](#central-plant) or [Field units](#field-units).
+2. **Count** the 15-minute periods in the week in which each metadata shows running, as defined in [When a metadata shows running](#when-a-metadata-shows-running).
+3. **Take the lowest.** The unit is drawn from the metadata with the fewest running periods, because every listed metadata shows running whenever the unit runs.
+4. **Leave out stuck metadata.** A metadata that is off or zero all week is left out while another of the unit's metadata, other than a temperature, changes.
+5. **Nothing changed.** If none of the unit's metadata changed all week, the unit is drawn off when all of it is off, drawn on and noted as unverified when all of it is on, and shown as no reliable data otherwise.
 
 The chart link for each unit opens every metadata fetched for it, the one the unit is drawn from first.
 
@@ -26,7 +19,7 @@ The chart link for each unit opens every metadata fetched for it, the one the un
 | Status: name ends in Status, Running or Flow Status | its value is 1 (on); for a status numbered from 1, whose values are 1 and 2, its value is 2 |
 | Multi-state status: name ends in (MSV) | its value is above its off state, which is 0 if the value is 0 at any time in the week and 1 otherwise |
 | Speed, frequency, current, power, load, firing rate or velocity | its value is above 5% of its highest value in the week |
-| Leaving water temperature, heating plant only | its value is at or above the midpoint between its lowest and highest values in the week; not used if those differ by less than 5 °C, or 9 °F for metadata in Fahrenheit |
+| Leaving water temperature | its value is at or above the midpoint between its lowest and highest values in the week. Never used on its own, nor when those values differ by less than 5 °C (9 °F) |
 
 A value applies until the next one, for up to one hour, or up to 1.5 times the metadata's usual reporting interval if it reports less often than every 15 minutes. A longer gap is shown as no data, not as off.
 
@@ -34,7 +27,9 @@ A metadata name with a unit in brackets, such as (MSV), (Hz), (RPM), (Fahrenheit
 
 ## Metadata to fetch
 
-A metadata belongs in an equipment type's list only if it reads running at every time the equipment runs. Compressor metadata does not, because the compressor cycles while the unit runs. This covers compressor metadata on fan units, a chiller's Compressor Status, and one stage of a multi-compressor chiller (names starting Chiller Compressor). Neither does metadata for a second fan or pump that can stop while the unit runs, such as an air handling unit's return fan. A unit with FCU in its name is treated as a Fan Coil Unit, whatever its equipment type in PEAK.
+A metadata belongs in an equipment type's list only if it reads running at every time the equipment runs. Compressor metadata does not, because the compressor cycles while the unit runs. This covers compressor metadata on fan units, a chiller's Compressor Status, and one stage of a multi-compressor chiller (names starting Chiller Compressor). Neither does metadata for a second fan or pump that can stop while the unit runs, such as an air handling unit's return fan. Enables and commands are not listed: they record whether the unit was allowed to run, not whether it ran.
+
+A unit with FCU in its name is treated as a Fan Coil Unit, whatever its equipment type in PEAK. A unit with no leaving water temperature of its own uses the one on its type's Common record, when the site has exactly one.
 
 To add a metadata, put its exact PEAK name in its equipment type's row, after checking in a PEAK chart that it reads running at every time the equipment runs.
 

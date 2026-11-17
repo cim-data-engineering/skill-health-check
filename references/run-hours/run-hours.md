@@ -35,15 +35,7 @@ Work in one directory, e.g. `runhours/`. Every call's response is saved to a fil
 
 ## How the row is drawn
 
-[run-hours-signals.md](run-hours-signals.md) holds the rules, in business terms an engineer can check: the metadata to fetch for each equipment type, how each counts as running, and how the row is chosen. In short:
-
-- The row is drawn from the metadata that shows the fewest running hours.
-- A reading off or zero all week is left out while another reading of the unit changes.
-- A leaving water temperature is used only alongside a reading, and its changes do not count when deciding whether a reading is left out.
-- When none of the unit's metadata changed all week:
-  - all off: drawn off;
-  - all on: drawn on and named as unverified;
-  - a mix: hatched as no reliable data.
+[run-hours-signals.md](run-hours-signals.md) holds the rules, in business terms an engineer can check: [How run hours are worked out](run-hours-signals.md#how-run-hours-are-worked-out), when each metadata shows running, and the metadata to fetch for each equipment type.
 
 Change a rule in that file, not here: `runhours_plan.py` reads its tables at run time, and `runhours_build.py` applies its rules. The data handling below is the scripts' own and needs no edit to chart a new metadata:
 
@@ -52,12 +44,11 @@ Change a rule in that file, not here: `runhours_plan.py` reads its tables at run
 - **Change-of-value logging**: some points send a handful of readings a week, nearly each one a change. They are logged on change rather than every 15 minutes, so each reading holds until the next and silence means the value did not change. Before its first reading, a two-state point was the other way; anything else is hatched until then. Such a point reads like `Mon 07:22=1 · Mon 17:39=0 · Tue 06:58=1 …`.
 - **Collector restarts**: a data collector coming back can write 0 to every point it serves in its first sweep, then the true values in the next. A sweep of ten or more points sharing a timestamp to the second, every one reading 0, is a restart and not the plant stopping when the periodic points that were running read running again at their next reading. Its readings are left out, so a speed held at 100 all week still reads as held, and the notes give the time. A sweep that stays at 0 is a real stop and is kept.
 - **Common pair records** (`Common - PCHWP - 3/4`, `SHWP P-10A/B - COMMON`, `AHU-CHWP-10-11-COMMON`) are left out where a member unit is drawn from metadata at least as good as the pair's own. They are kept where they are the only record of the pumps running. A COMMON record that names no member numbers (`EWH-COMMON`) is drawn like any unit if it has listed metadata. A pair is grouped with its members.
-- **Shared leaving water temperature**: a heating unit with no leaving water temperature of its own uses the one on its type's Common record, as [How run hours are worked out](run-hours-signals.md#how-run-hours-are-worked-out) says. Where a type has more than one Common record with a temperature, none is used.
 - **Fan coils typed as something else**: a unit with FCU in its name is grouped under Fan Coil Units, whatever its PEAK type, and the notes say so. No other unit is regrouped by its name.
 
 ## Display
 
-Two pages, stacked in one file and printing one chart per sheet: **Central plant**, then **Field units**. A page with no rows is left out.
+Two pages, stacked in one file and printing one chart per sheet: **Central plant**, then **Field units**. A page is left out when it has no rows and no units waiting for the later pass.
 
 | Element | Encoding |
 | --- | --- |
