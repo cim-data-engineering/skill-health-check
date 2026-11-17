@@ -401,7 +401,7 @@ def build(window, plan, rows, max_pass):
     points = {str(p["fav_id"]): read_point(readings.get(str(p["fav_id"])), p)
               for u in units for p in u["pull"]}
 
-    notes = {"split": [], "held_other": [], "unverified": [], "clock": [], "off": [], "temp": [],
+    notes = {"split": [], "held_other": [], "unverified": [], "off": [], "temp": [],
              "on_change": [], "sparse": [], "nodata": [], "gaps": [], "drawn": Counter()}
     pages, csv_rows, prev = {}, [], None
     for u in (u for u in units if u["pull"]):
@@ -430,7 +430,7 @@ def build(window, plan, rows, max_pass):
             if d.point["role"] == "temp":
                 notes["temp"].append(f"{u['name']}" + (f" (from {d.point['shared']})" if d.point.get("shared") else ""))
             if d.flat and d.reading["hours"]:
-                notes["clock" if u.get("around_the_clock") else "unverified"].append(u["name"])
+                notes["unverified"].append(u["name"])
             if not row["runs"]:
                 notes["off"].append(u["name"])
             if d.reading["on_change"]:
@@ -500,9 +500,6 @@ def note_lines(window, plan, units, notes, resets, max_pass):
     if notes["unverified"]:
         lines.append("On in every reading all week, with nothing that changed to check it against, so "
                      f"unverified: {listing(notes['unverified'])}.")
-    if notes["clock"]:
-        lines.append("On all week, as a unit serving a comms, server or computer room normally is: "
-                     f"{listing(notes['clock'])}.")
     if notes["off"]:
         lines.append("Off in every reading all week, so drawn as off: "
                      f"{listing(notes['off'])}.")

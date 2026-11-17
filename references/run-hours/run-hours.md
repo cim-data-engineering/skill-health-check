@@ -42,7 +42,7 @@ Work in one directory, e.g. `runhours/`. Every call's response is saved to a fil
 - A leaving water temperature is used only alongside a reading, and its changes do not count when deciding whether a reading is left out.
 - When none of the unit's metadata changed all week:
   - all off: drawn off;
-  - all on: drawn on and named as unverified, unless it serves a room that runs around the clock;
+  - all on: drawn on and named as unverified;
   - a mix: hatched as no reliable data.
 
 Change a rule in that file, not here: `runhours_plan.py` reads its tables at run time, and `runhours_build.py` applies its rules. The data handling below is the scripts' own and needs no edit to chart a new metadata:
@@ -95,7 +95,7 @@ The build step prints them, in this order; state them under the view. Each list 
 - Units whose metadata disagreed, each drawn from the one with the fewest running hours, with the hours of each.
 - Readings left out as off or zero all week while another reading of the unit changed.
 - Units drawn from the leaving water temperature, which showed less running than their readings.
-- Units on in every reading all week, with nothing that changed to check them against: unverified. On a line of their own, those serving a room that runs around the clock (the [Runs around the clock](run-hours-signals.md#runs-around-the-clock) table), for which on all week is expected.
+- Units on in every reading all week, with nothing that changed to check them against: unverified.
 - Units off in every reading all week, drawn as off.
 - Units logged on change of value, held between readings; units reporting less often than every 15 minutes, by interval.
 - Hatched rows and why. Collector restarts left out, with their times. Data gaps, where a stretch several units lost at once is named once with its times.

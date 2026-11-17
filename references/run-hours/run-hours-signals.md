@@ -13,7 +13,7 @@ In this file, a **reading** is a status, speed, frequency, current, power, load,
 5. **Temperatures only alongside a reading.** A temperature is used only for a unit that also has at least one reading. It can lower the run hours but is never the only metadata used. Its changes do not count for step 4, because it follows the water loop, which other units also heat.
 6. **Nothing changed.** If none of the unit's metadata changed all week:
    - **All off:** the unit is drawn as off for the whole week.
-   - **All on:** the unit is drawn as running for the whole week and listed in the notes as unverified, unless it serves a room that [runs around the clock](#runs-around-the-clock).
+   - **All on:** the unit is drawn as running for the whole week and listed in the notes as unverified.
    - **Some on, some off:** the unit is shown as having no reliable data.
 7. **No enables or commands.** Metadata whose name ends in Enable, Command or Occupancy is not fetched, because it records whether the unit was allowed to run, not whether it ran.
 
@@ -88,11 +88,3 @@ To add a metadata, put its exact PEAK name in its equipment type's row, after ch
 | Unit Heater | UH | Unit Heater Fan Current · Unit Heater Fan Status |
 | Air Cooled Condensers | ACC | Condenser Unit Status |
 | Variable Refrigerant Flow Systems | VRF | VRF Outdoor Unit Power · VRF Outdoor Unit Status · VRF Unit Fan Speed · VRF Unit Fan Status |
-
-## Runs around the clock
-
-A unit on all week is expected to be, not unverified, when it is of one of these types or its name or zone contains one of these words.
-
-| Short codes | Name or zone contains |
-| --- | --- |
-| CRAC | Comms, Communication, Communications, Server, Data Room, Data Hall, Data Centre, Data Center, MDF |

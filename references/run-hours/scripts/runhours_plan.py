@@ -78,16 +78,6 @@ def _cells(line):
     return [c.strip().strip("`").strip() for c in line.strip().strip("|").split("|")]
 
 
-def _split(cell):
-    return [p.strip() for p in (cell or "").split(",") if p.strip()]
-
-
-def _phrase(text):
-    """Whole-word, case-insensitive matcher for one phrase; a space also matches - or _."""
-    words = [re.escape(w) for w in text.lower().split()]
-    return re.compile(r"(?<![a-z0-9])" + r"[\s_-]+".join(words) + r"(?![a-z0-9])")
-
-
 def name_tokens(name):
     return [t for t in re.split(r"[^A-Za-z0-9]+", (name or "").upper()) if t]
 
@@ -129,7 +119,7 @@ def metadata_role(name):
 class Rules:
     """The tables of references/run-hours/run-hours-signals.md: equipment types and the metadata to fetch."""
 
-    NEEDED = ("Central plant", "Field units", "Runs around the clock")
+    NEEDED = ("Central plant", "Field units")
 
     def __init__(self, path=SIGNALS):
         tables = read_tables(path)
@@ -148,9 +138,6 @@ class Rules:
                 self.types[code] = {"code": code, "name": row["Equipment type"], "order": order, "page": page}
                 self.lists[code] = {base_name(n): i for i, n in enumerate(names)}
                 order += 1
-        clock = tables["Runs around the clock"]
-        self.clock_codes = {c for row in clock for c in _split(row["Short codes"])}
-        self.clock_words = [_phrase(p) for row in clock for p in _split(row["Name or zone contains"])]
 
     def classify(self, name, *type_codes):
         """(role, rank key, speed state?) when the name is listed for one of these types, else None."""
@@ -162,12 +149,6 @@ class Rules:
                 state = role == "status" and "(msv)" in name.lower() and "speed" in name.lower()
                 return role, (rank, len(name)), state
         return None
-
-    def runs_around_the_clock(self, unit):
-        if {unit["peak_type"], unit["type"]} & self.clock_codes:
-            return True
-        text = " ".join((unit.get(k) or "").lower() for k in ("name", "zone"))
-        return any(rx.search(text) for rx in self.clock_words)
 
     def charted_type(self, equipment_name, peak_type):
         """A unit with FCU in its name is a Fan Coil Unit, whatever its type in PEAK."""
@@ -525,7 +506,6 @@ def cmd_plan(args):
         unit["type_name"], unit["page"] = ty["name"], ty["page"]
         if unit["type"] != peak:
             unit["regrouped_from"] = rules.types[peak]["name"]
-        unit["around_the_clock"] = rules.runs_around_the_clock(unit)
         pick_points(unit, rules)
         units.append(unit)
     drop_covered_pairs(units)
@@ -547,7 +527,7 @@ def cmd_plan(args):
     dead = [u for u in units if u.get("why") == "no history this week"]
     plan = {
         "units": [{k: u.get(k) for k in ("equipment_id", "name", "type", "type_name", "page",
-                                          "level", "zone", "regrouped_from", "around_the_clock",
+                                          "level", "zone", "regrouped_from",
                                           "pass", "pull", "why")}
                   for u in units],
         "chunks": chunks,
