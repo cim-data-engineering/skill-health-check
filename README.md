@@ -1,6 +1,6 @@
 # health-check
 
-A PEAK skill that renders a health check for one site in chat: equipment health by equipment type, indoor environment by level, the assignee leaderboard, or equipment run hours against the site's working hours.
+A PEAK skill that renders one health check for one site in chat: an equipment health snapshot, an indoor environment health snapshot, the assignee leaderboard, or equipment run hours.
 
 ## Install
 
@@ -15,11 +15,18 @@ A PEAK skill that renders a health check for one site in chat: equipment health 
 /health-check <check> <site name>
 ```
 
-`<check>` is `equipment`, `indoor environment`, `leaderboard` or `run hours`. Without one, the skill asks which.
+Without a check, the skill asks which:
+
+| Check | Renders |
+| --- | --- |
+| Equipment health snapshot | Health by equipment type, monthly |
+| Indoor environment health snapshot | Thermal comfort by level, monthly |
+| Assignee leaderboard | Who closed the work, last 90 days |
+| Equipment run hours | When plant runs vs when the building is occupied, last full week |
 
 ## Releases
 
-- **13 Aug 2026**: First release. Equipment health, indoor environment and assignee leaderboard
+- **13 Aug 2026**: First release. Equipment health snapshot, indoor environment health snapshot and assignee leaderboard
 - **18 Aug 2026**: Equipment run hours
-- **6 Oct 2026**: Run hours as a weekly chart, one row per unit, each linked to its PEAK chart
-- **17 Nov 2026**: Run hours drawn from the metadata listed for each equipment type, using the one with the fewest running hours
+- **6 Oct 2026**: Equipment run hours as a weekly chart, one row per unit, each linked to its PEAK chart
+- **17 Nov 2026**: Equipment run hours drawn from the metadata listed for each equipment type, using the one with the fewest running hours
