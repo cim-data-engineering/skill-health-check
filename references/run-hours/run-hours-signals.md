@@ -6,14 +6,14 @@ In this file, a **reading** is a status, speed, frequency, current, power, load,
 
 ## How run hours are worked out
 
-1. **Fetch.** Fetch every metadata listed for the unit's equipment type that the unit has, in **Central plant**, **Field units** and **Only when the main metadata did not change**. For heating plant with no leaving water temperature of its own, also fetch the leaving water temperature listed for its type from the plant's shared record, the record of the same equipment type with Common in its name. If the site has more than one such record for the type, none is used.
-2. **Count.** Metadata under **Only when the main metadata did not change** is used only if none of the unit's readings in **Central plant** or **Field units** changed during the week. For each metadata used, find the 15-minute periods in the week in which it shows running, as defined in **When a metadata shows running**.
+1. **Fetch.** Fetch every metadata listed for the unit's equipment type that the unit has, in [Central plant](#central-plant), [Field units](#field-units) and [Only when the main metadata did not change](#only-when-the-main-metadata-did-not-change). For heating plant with no leaving water temperature of its own, also fetch the leaving water temperature listed for its type from the plant's shared record, the record of the same equipment type with Common in its name. If the site has more than one such record for the type, none is used.
+2. **Count.** Metadata under [Only when the main metadata did not change](#only-when-the-main-metadata-did-not-change) is used only if none of the unit's readings in [Central plant](#central-plant) or [Field units](#field-units) changed during the week. For each metadata used, find the 15-minute periods in the week in which it shows running, as defined in [When a metadata shows running](#when-a-metadata-shows-running).
 3. **Take the lowest.** The unit is drawn from the metadata with the fewest running periods. Every listed metadata reads running whenever the equipment runs, so the equipment ran no longer than its lowest metadata shows.
 4. **Leave out a reading stuck at off.** A reading that is off or zero all week is left out while another reading of the unit changes during the week. Otherwise it would always be the lowest, although the unit's other readings show it switching on and off.
 5. **Temperatures only alongside a reading.** A temperature is used only for a unit that also has at least one reading. It can lower the run hours but is never the only metadata used. Its changes do not count for step 4, because it follows the water loop, which other units also heat.
 6. **Nothing changed.** If none of the unit's metadata changed all week:
    - **All off:** the unit is drawn as off for the whole week.
-   - **All on:** the unit is drawn as running for the whole week and listed in the notes as unverified, unless it serves a room that runs around the clock.
+   - **All on:** the unit is drawn as running for the whole week and listed in the notes as unverified, unless it serves a room that [runs around the clock](#runs-around-the-clock).
    - **Some on, some off:** the unit is shown as having no reliable data.
 7. **No enables or commands.** Metadata whose name ends in Enable, Command or Occupancy is not fetched, because it records whether the unit was allowed to run, not whether it ran.
 
@@ -34,7 +34,7 @@ A metadata name with a unit in brackets, such as (MSV), (Hz), (RPM), (Fahrenheit
 
 ## Metadata to fetch
 
-A metadata belongs in an equipment type's list only if it reads running at every time the equipment runs. Compressor metadata does not, because the compressor cycles while the unit runs. This covers compressor metadata on fan units, a chiller's Compressor Status, and one stage of a multi-compressor chiller (names starting Chiller Compressor). Metadata for a second fan or pump that can stop while the unit runs goes under **Only when the main metadata did not change**. A unit with FCU in its name is treated as a Fan Coil Unit, whatever its equipment type in PEAK.
+A metadata belongs in an equipment type's list only if it reads running at every time the equipment runs. Compressor metadata does not, because the compressor cycles while the unit runs. This covers compressor metadata on fan units, a chiller's Compressor Status, and one stage of a multi-compressor chiller (names starting Chiller Compressor). Metadata for a second fan or pump that can stop while the unit runs goes under [Only when the main metadata did not change](#only-when-the-main-metadata-did-not-change). A unit with FCU in its name is treated as a Fan Coil Unit, whatever its equipment type in PEAK.
 
 To add a metadata, put its exact PEAK name in its equipment type's row, after checking in a PEAK chart that it reads running at every time the equipment runs.
 
@@ -91,7 +91,7 @@ To add a metadata, put its exact PEAK name in its equipment type's row, after ch
 
 ## Only when the main metadata did not change
 
-These metadata are fetched, but used only when none of the unit's readings in **Central plant** or **Field units** changed during the week, including when the unit has none of them.
+These metadata are fetched, but used only when none of the unit's readings in [Central plant](#central-plant) or [Field units](#field-units) changed during the week, including when the unit has none of them.
 
 | Equipment type | Short code | Metadata to fetch | Why not in the main list |
 | --- | --- | --- | --- |
