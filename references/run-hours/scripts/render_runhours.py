@@ -15,11 +15,38 @@ view as well as to save; a pre-drawn SVG of the same week is several times
 larger. The data is checked here before it is written, so a malformed field
 fails in Python rather than as a blank page.
 
-The aggregate JSON (see "Aggregate schema" in
-references/run-hours/run-hours.md) is the renderer's only input. Every
-layout / colour / font value lives in a named constant below so the whole
-look can be restyled in one place. The encodings themselves are the render
-contract in that reference's Display section and must not drift.
+The aggregate JSON below is the renderer's only input; a hand-rolled view
+targets the same shape. Every layout / colour / font value lives in a named
+constant below so the whole look can be restyled in one place. The encodings
+are the render contract in the Display section of
+references/run-hours/run-hours.md and must not drift.
+
+Aggregate schema. Slots are 15-minute steps from Monday 00:00 local, 0 to 672,
+as [start, end).
+
+    {
+      "site_name": "str",
+      "window_label": "str",              // "Mon 14 to Sun 20 Sep 2026"
+      "tz_label": "str",                  // "BST"
+      "days": [{"label": "Mon 14", "wh": [36, 88]}],   // working-hours slots that day, or null when closed
+      "pages": [{
+        "title": "Central plant",
+        "groups": [{"name": "Chiller", "rows": [{
+          "name": "str",
+          "href": "str",                  // the PEAK chart link
+          "runs": [[28, 100]],            // running ranges across the week; may cross midnight
+          "gaps": [[300, 310]],           // no data for longer than a reading holds: hatched
+          "nodata": null,                 // or why the whole row is hatched
+          "level_break": false,           // small gap above: first unit of a new level
+          "point": "str",                 // the metadata the row is drawn from
+          "where": ["L3", "Open Office"], // level and zone for the label, "" where left out; [] for neither
+          "where_full": "str"             // level and zone as PEAK has them, for the hover
+        }]}],
+        "not_shown": "str"                // "Not shown: 305 units.", or ""
+      }],
+      "footer": "str",
+      "notes": ["str"]
+    }
 
 Standard library only — no third-party dependencies, by design, so the script
 runs wherever the skill is unpacked.
