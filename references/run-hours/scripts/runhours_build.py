@@ -2,15 +2,12 @@
 """Turn a run-hours plan and its history pulls into the view's aggregate.
 
 Usage:
-    python3 runhours_build.py <workdir> <history.json> [more.json ...] [--pass 2]
+    python3 runhours_build.py <workdir> <history.json> [more.json ...]
 
 Reads <workdir>/window.json and plan.json, loads the pulled history, decides
 each unit's row — status or analog, whichever shows less running — and writes
 <workdir>/agg.json (the renderer's only input) and <workdir>/days.csv (per unit
 per day, for follow-ups). Prints the notes to state with the view.
-
---pass 2 adds the later pass once its history has been pulled; pass every
-history file from both passes.
 
 Standard library only — no third-party dependencies, by design, so the script
 runs wherever the skill is unpacked.
@@ -356,12 +353,6 @@ def chart_link(window, unit, favs):
             + "".join(f"&fav-{eid}={','.join(str(x) for x in ids)}" for eid, ids in groups.items()))
 
 
-def not_shown_line(plan, page, max_pass):
-    """Under a chart: how many of the page's units with listed metadata are not on it yet."""
-    n = sum(1 for u in plan["units"] if u.get("page") == page and u["pull"] and u["pass"] > max_pass)
-    return f"Not shown: {units_text(n)}." if n else ""
-
-
 def signal_kind(point):
     return "state" if point.get("state") else point["role"]
 
@@ -395,8 +386,8 @@ def where(unit):
 
 
 # ---- Build -------------------------------------------------------------------
-def build(window, plan, rows, max_pass):
-    units = [u for u in plan["units"] if u["pass"] <= max_pass]
+def build(window, plan, rows):
+    units = plan["units"]
     readings, resets = slot_readings(rows, window)
     points = {str(p["fav_id"]): read_point(readings.get(str(p["fav_id"])), p)
               for u in units for p in u["pull"]}
@@ -450,9 +441,8 @@ def build(window, plan, rows, max_pass):
         "site_name": window["site_name"], "window_label": window["label"],
         "tz_label": window["tz_label"],
         "days": [{"label": d["label"], "wh": d["wh"]} for d in window["days"]],
-        "pages": [{"title": title, "groups": [{"name": g, "rows": rs} for g, rs in pages.get(title, {}).items()],
-                   "not_shown": not_shown_line(plan, title, max_pass)}
-                  for title in PAGE_ORDER if title in pages or not_shown_line(plan, title, max_pass)],
+        "pages": [{"title": title, "groups": [{"name": g, "rows": rs} for g, rs in pages[title].items()]}
+                  for title in PAGE_ORDER if title in pages],
         "footer": ("Each row is drawn from the metadata listed for its equipment type that shows the fewest "
                    "running hours: a run status, a speed, current or power reading, or for heating plant the "
                    "leaving water temperature. Enables and schedules are not used. Click a unit name to open its PEAK chart "
@@ -461,7 +451,7 @@ def build(window, plan, rows, max_pass):
                    "point history at 15-minute resolution, times in site local time "
                    f"({window['tz_label']})."),
     }
-    agg["notes"] = note_lines(window, plan, units, notes, resets, max_pass)
+    agg["notes"] = note_lines(window, plan, units, notes, resets)
     return agg, csv_rows
 
 
@@ -481,7 +471,7 @@ def day_rows(window, unit, chosen, reading):
     return out
 
 
-def note_lines(window, plan, units, notes, resets, max_pass):
+def note_lines(window, plan, units, notes, resets):
     lines = [working_hours_note(window)]
     drawn, hatched = notes["drawn"], len(notes["nodata"])
     kinds = ", ".join(f"{SIGNAL_WORDS[r]} {drawn[r]}" for r in SIGNAL_WORDS if drawn[r])
@@ -553,13 +543,6 @@ def note_lines(window, plan, units, notes, resets, max_pass):
         records = hit["no listed metadata"]
         lines.append(f"None of the metadata listed for their type, not drawn: {listing(u['name'] for u in records)} "
                      f"({by_type(records)}).")
-    later = [u for u in plan["units"] if u["pull"] and u["pass"] > max_pass]
-    if later:
-        types = Counter(u["type_name"] for u in later)
-        calls = sum(1 for c in plan["chunks"] if c["pass"] > max_pass)
-        lines.append(f"Not fetched yet: {units_text(len(later))} in {plural(len(types), 'type')} ("
-                     + ", ".join(f"{t} {n}" for t, n in types.items())
-                     + f"), {plural(calls, 'more history call')}. Offer to fetch them.")
     return lines
 
 
@@ -589,17 +572,14 @@ def main(argv):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("workdir")
     parser.add_argument("history", nargs="+", help="saved platform.history results")
-    parser.add_argument("--pass", dest="max_pass", type=int, default=1,
-                        help="include the later pass (2) once it has been pulled")
     args = parser.parse_args(argv[1:])
     work = Path(args.workdir)
     try:
         window = json.loads((work / "window.json").read_text())
         plan = json.loads((work / "plan.json").read_text())
-        fav_ids = [p["fav_id"] for u in plan["units"] if u["pass"] <= args.max_pass
-                   for p in u["pull"]]
+        fav_ids = [p["fav_id"] for u in plan["units"] for p in u["pull"]]
         rows = load_rows(args.history, fav_ids)
-        agg, days = build(window, plan, rows, args.max_pass)
+        agg, days = build(window, plan, rows)
     except (OSError, ValueError, KeyError) as exc:
         sys.exit(f"runhours_build: {exc}")
     (work / "agg.json").write_text(json.dumps(agg, indent=1))

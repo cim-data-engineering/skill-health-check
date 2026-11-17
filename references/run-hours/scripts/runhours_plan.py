@@ -4,8 +4,7 @@
 Usage:
     python3 runhours_plan.py window <site.json> <workdir> [--week-of YYYY-MM-DD]
                                     [--hours "Mon-Fri 08:00-18:00, Sat 09:00-13:00"]
-    python3 runhours_plan.py plan <workdir> <discovery.json> [more.json ...] [--cap N]
-    python3 runhours_plan.py calls <workdir> [--pass 2]
+    python3 runhours_plan.py plan <workdir> <discovery.json> [more.json ...]
     python3 runhours_plan.py last <workdir> <last-reading.json>
 
 window  Reads the saved search_sites result (timezone and working hours), fixes
@@ -13,10 +12,8 @@ window  Reads the saved search_sites result (timezone and working hours), fixes
         <workdir>/window.json and prints the discovery call to make.
         --hours assesses against the user's hours instead of the site's.
 plan    Keeps each unit's metadata listed for its equipment type in
-        references/run-hours/run-hours-signals.md, orders the units for the view, splits them into a
-        first pass of up to --cap units and the rest, writes
-        <workdir>/plan.json and prints the history calls to make.
-calls   Prints the history calls for the later pass, once the user asks for it.
+        references/run-hours/run-hours-signals.md, orders the units for the view,
+        writes <workdir>/plan.json and prints the history calls to make.
 last    Reads the latest-reading call the plan prints when nothing logged all
         week, and says when the site last reported, in site local time.
 
@@ -39,7 +36,6 @@ from runhours_history import read_page, read_results  # noqa: E402
 SIGNALS = Path(__file__).resolve().parent.parent / "run-hours-signals.md"
 
 # ---- Tunables ----------------------------------------------------------------
-CAP_UNITS       = 100    # first-pass size; central plant is always fetched whole
 POINTS_PER_CALL = 36     # ~672 rows per point-week keeps a call under ~25k rows / ~2 MB
 DISCOVERY_LIMIT = 1000   # units per discovery page: ~170 KB for a 100-unit office tower
 PROBE_POINTS    = 20     # points asked for the latest reading when nothing logged all week,
@@ -472,25 +468,6 @@ def drop_covered_pairs(units):
             unit["why"], unit["pull"] = "pair point, members charted", []
 
 
-def assign_passes(units, cap):
-    """Central plant in the first pass whole; each field type whole where it still fits under cap.
-
-    A type too big to fit waits for the later pass without holding back the
-    smaller types after it; while the first pass is still empty, the next type
-    goes in whatever its size, so there is always a first view.
-    """
-    count = sum(1 for u in units if u["pull"] and u["page"] == "Central plant")
-    for u in units:
-        u["pass"] = 1
-    for type_code in dict.fromkeys(u["type"] for u in units if u["page"] != "Central plant"):
-        group = [u for u in units if u["type"] == type_code]
-        size = sum(1 for u in group if u["pull"])
-        fits = cap is None or count == 0 or count + size <= cap
-        for u in group:
-            u["pass"] = 1 if fits else 2
-        count += size if fits else 0
-
-
 def cmd_plan(args):
     work = Path(args.workdir)
     window = json.loads((work / "window.json").read_text())
@@ -517,18 +494,14 @@ def cmd_plan(args):
                 natural(u["level"]), natural(u["name"]))
 
     units.sort(key=order)
-    assign_passes(units, args.cap if args.cap and args.cap > 0 else None)
-    chunks = []
-    for pass_no in (1, 2):
-        favs = list(dict.fromkeys(p["fav_id"] for u in units if u["pass"] == pass_no for p in u["pull"]))
-        chunks += [{"pass": pass_no, "fav_ids": favs[i:i + POINTS_PER_CALL]}
-                   for i in range(0, len(favs), POINTS_PER_CALL)]
+    favs = list(dict.fromkeys(p["fav_id"] for u in units for p in u["pull"]))
+    chunks = [{"fav_ids": favs[i:i + POINTS_PER_CALL]} for i in range(0, len(favs), POINTS_PER_CALL)]
 
     dead = [u for u in units if u.get("why") == "no history this week"]
     plan = {
         "units": [{k: u.get(k) for k in ("equipment_id", "name", "type", "type_name", "page",
                                           "level", "zone", "regrouped_from",
-                                          "pass", "pull", "why")}
+                                          "pull", "why")}
                   for u in units],
         "chunks": chunks,
         "outage": bool(dead) and not any(u["pull"] for u in units),
@@ -540,7 +513,7 @@ def cmd_plan(args):
     if not chunks:
         print_nothing_to_draw(window, plan, dead, work)
         return
-    print_calls(window, plan, 1, work)
+    print_calls(window, plan, work)
 
 
 def probe_points(dead):
@@ -565,16 +538,12 @@ WHY_TEXT = {"temperature only": "only a temperature, which is never used on its 
 
 
 def print_summary(plan):
-    for pass_no, label in ((1, "First pass"), (2, "Later pass")):
-        drawn = [u for u in plan["units"] if u["pull"] and u["pass"] == pass_no]
-        if not drawn:
-            continue
+    drawn = [u for u in plan["units"] if u["pull"]]
+    if drawn:
         types = Counter(u["type_name"] for u in drawn)
-        calls = sum(1 for c in plan["chunks"] if c["pass"] == pass_no)
         points = sum(len(u["pull"]) for u in drawn)
-        detail = (": " + ", ".join(f"{t} {n}" for t, n in types.items())) if pass_no == 2 else ""
-        print(f"{label}: {plural(len(drawn), 'unit')} in {plural(len(types), 'type')}, "
-              f"{plural(points, 'point')}, {plural(calls, 'history call')}{detail}.")
+        print(f"To draw: {plural(len(drawn), 'unit')} in {plural(len(types), 'type')}, "
+              f"{plural(points, 'point')}, {plural(len(plan['chunks']), 'history call')}.")
     for why, n in Counter(u["why"] for u in plan["units"] if not u["pull"]).items():
         print(f"Not drawn: {plural(n, 'unit')}, {WHY_TEXT.get(why, why)}.")
     regrouped = Counter(f"{u['regrouped_from']} as {u['type_name']}"
@@ -601,24 +570,14 @@ def print_nothing_to_draw(window, plan, dead, work):
               "run-hours-signals.md. Say so with the summary above rather than showing an empty view.")
 
 
-def print_calls(window, plan, pass_no, work):
-    chunks = [c for c in plan["chunks"] if c["pass"] == pass_no]
-    label = "first pass" if pass_no == 1 else "later pass"
-    if not chunks:
-        print(f"No history calls for the {label}: every unit with listed metadata is in the other pass.")
-        return
-    names = f"history-{pass_no}-1.json" + (f" to history-{pass_no}-{len(chunks)}.json" if len(chunks) > 1 else "")
-    print(f"History calls, {label}: {len(chunks)}. Make each exactly as printed, in parallel, and save "
+def print_calls(window, plan, work):
+    chunks = plan["chunks"]
+    names = "history-1.json" + (f" to history-{len(chunks)}.json" if len(chunks) > 1 else "")
+    print(f"History calls: {len(chunks)}. Make each exactly as printed, in parallel, and save "
           f"the responses in {work} as {names}, in the order printed:")
     for chunk in chunks:
         print(json.dumps(history_call({"fav_ids": chunk["fav_ids"], "start": window["start"],
                                        "end": window["end"], "end_exclusive": True})))
-
-
-def cmd_calls(args):
-    work = Path(args.workdir)
-    window = json.loads((work / "window.json").read_text())
-    print_calls(window, json.loads((work / "plan.json").read_text()), args.pass_no, work)
 
 
 def cmd_last(args):
@@ -654,20 +613,15 @@ def main(argv):
     w.add_argument("--hours", help='the user\'s working hours, e.g. "Mon-Fri 08:00-18:00, Sat 09:00-13:00"; '
                                    "a day not named is closed")
     w.add_argument("--today", help=argparse.SUPPRESS)
-    p = sub.add_parser("plan", help="pick points and passes from the discovery pages")
+    p = sub.add_parser("plan", help="pick each unit's metadata from the discovery pages")
     p.add_argument("workdir")
     p.add_argument("discovery", nargs="+", help="saved discovery pages")
-    p.add_argument("--cap", type=int, default=CAP_UNITS,
-                   help=f"first-pass units (default {CAP_UNITS}; 0 fetches everything)")
-    c = sub.add_parser("calls", help="print the history calls for one pass of an existing plan")
-    c.add_argument("workdir")
-    c.add_argument("--pass", dest="pass_no", type=int, default=2)
     last = sub.add_parser("last", help="say when the site last reported, from the saved latest-reading call")
     last.add_argument("workdir")
     last.add_argument("response", help="saved response of the latest-reading call")
     args = parser.parse_args(argv[1:])
     try:
-        {"window": cmd_window, "plan": cmd_plan, "calls": cmd_calls, "last": cmd_last}[args.command](args)
+        {"window": cmd_window, "plan": cmd_plan, "last": cmd_last}[args.command](args)
     except (ValueError, KeyError) as exc:
         sys.exit(f"runhours_plan: {exc}")
 

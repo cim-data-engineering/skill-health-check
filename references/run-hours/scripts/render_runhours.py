@@ -41,8 +41,7 @@ as [start, end).
           "point": "str",                 // the metadata the row is drawn from
           "where": ["L3", "Open Office"], // level and zone for the label, "" where left out; [] for neither
           "where_full": "str"             // level and zone as PEAK has them, for the hover
-        }]}],
-        "not_shown": "str"                // "Not shown: 305 units.", or ""
+        }]}]
       }],
       "footer": "str",
       "notes": ["str"]
@@ -105,7 +104,6 @@ GROUP_H     = 28
 GROUP_GAP   = 6
 LEVEL_GAP   = 8
 BOTTOM_PAD  = 18
-NOT_SHOWN_H = 30     # the line under the chart counting units not on it
 BAR_OVERLAP = 0.3    # widen each piece a hair so a split bar reads as one
 
 WEEK_SLOTS = 7 * 96
@@ -157,7 +155,7 @@ function row(r, y, fg, hatch) {
 }
 
 function chart(pi, el) {
-  const [title, groups, notShown] = D.pages[pi], hatch = "hatch" + pi, bg = [], fg = [];
+  const [title, groups] = D.pages[pi], hatch = "hatch" + pi, bg = [], fg = [];
   fg.push(text(K.leftPad, K.titleY, title, K.fsTitle, K.text, 'font-weight="600"'));
   fg.push(text(K.leftPad, K.subtitleY, D.site + ", " + D.window + ". Grey columns are working hours.", K.fsSubtitle, K.muted));
   const legend = [[K.in, "During working hours"], [K.out, "Outside working hours"]];
@@ -180,9 +178,7 @@ function chart(pi, el) {
     for (const r of rows) { if (r[4]) y += K.levelGap; row(r, y, fg, hatch); y += K.rowH; }
     y += K.groupGap;
   }
-  const bottom = y;
-  if (notShown) { fg.push(text(K.leftPad, y + 20, notShown, K.fsHours, K.muted)); y += K.notShownH; }
-  const height = y + K.bottomPad;
+  const bottom = y, height = y + K.bottomPad;
   D.days.forEach((d, i) => { if (d[1] !== null)
     bg.push(`<rect x="${(dx(i) + d[1] * SW).toFixed(2)}" y="${K.gridTop}" width="${((d[2] - d[1]) * SW).toFixed(2)}" ` +
       `height="${bottom - K.gridTop}" rx="4" fill="${K.band}"/>`); });
@@ -254,7 +250,7 @@ def compact(agg):
                                               int(bool(r.get("level_break"))), r["href"][len(prefix):],
                                               r.get("point") or "", r.get("where") or [], r.get("where_full") or ""]
                                              for r in g["rows"]]]
-                                for g in p["groups"]], p.get("not_shown") or ""] for p in agg["pages"]],
+                                for g in p["groups"]]] for p in agg["pages"]],
     }
 
 
@@ -270,7 +266,6 @@ def constants(agg):
         "rowIndent": ROW_INDENT, "labelMaxW": LABEL_MAX_W, "titleY": TITLE_Y, "subtitleY": SUBTITLE_Y,
         "legendY": LEGEND_Y, "legendW": LEGEND_W, "gridTop": GRID_TOP, "rowH": ROW_H, "barH": BAR_H,
         "groupH": GROUP_H, "groupGap": GROUP_GAP, "levelGap": LEVEL_GAP, "bottomPad": BOTTOM_PAD,
-        "notShownH": NOT_SHOWN_H,
         "overlap": BAR_OVERLAP,
     }
 

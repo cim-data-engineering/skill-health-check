@@ -7,8 +7,7 @@ When each unit ran over the last full week, against the site's working hours —
 - One site: `search_sites(site_name=X, include_working_hours: true)`. Take a top score of 0.9 or more, otherwise show the top 3 and ask.
 - The last full Monday-to-Sunday week in site local time, or the week the user names with `--week-of`.
 - Working hours come from the site, day by day. A closed day counts all its running as out of hours. If the site has none, the window step stops — ask the user what hours to use, never guess, and run it again with `--hours "Mon-Fri 08:00-18:00, Sat 09:00-13:00"`. A day not named is closed.
-- Every equipment type in [Central plant](run-hours-signals.md#central-plant) and [Field units](run-hours-signals.md#field-units).
-- The first pass takes up to 100 units — central plant whole, then each field-unit type that fits whole. Offer the rest after the view, never drop it silently.
+- Every unit of an equipment type in [Central plant](run-hours-signals.md#central-plant) and [Field units](run-hours-signals.md#field-units), however many.
 
 ## Data recipe
 
@@ -17,13 +16,11 @@ Work in `runhours/`, with the `search_sites` response saved as `site.json`. Make
 1. **Window** — `python3 references/run-hours/scripts/runhours_plan.py window runhours/site.json runhours`. Prints the discovery call.
 2. **Discovery** — the printed call, saved as `discovery-0.json`. Over 1,000 units, repeat it with `start_index` 1000, 2000, … as `discovery-1000.json`, ….
 3. **Plan** — `python3 references/run-hours/scripts/runhours_plan.py plan runhours runhours/discovery-*.json`. Prints the history calls.
-4. **History** — each printed call, in parallel, saved as `history-1-1.json`, `history-1-2.json`, …. A call that fails with a 5xx is too big — split its `fav_ids` in two and save both halves (`history-1-2a.json`, `history-1-2b.json`).
+4. **History** — each printed call, in parallel, saved as `history-1.json`, `history-2.json`, …. A call that fails with a 5xx is too big — split its `fav_ids` in two and save both halves (`history-2a.json`, `history-2b.json`).
 5. **Build** — `python3 references/run-hours/scripts/runhours_build.py runhours runhours/history-*.json`. Writes `agg.json` and `days.csv`, prints the notes.
 6. **Render** — `python3 references/run-hours/scripts/render_runhours.py runhours/agg.json runhours`. Writes `<site>-run-hours-<dates>.html`.
 
 No history calls means nothing to draw — say why, as the plan does, and show no empty view. If the plan prints a latest-reading call instead, the site's data feed is down: save it as `last-reading.json` and run `runhours_plan.py last runhours runhours/last-reading.json` to say when the site last reported.
-
-The later pass, on yes: `runhours_plan.py calls runhours` prints its calls (`history-2-1.json`, …). Pull them, run Build again over every history file with `--pass 2`, then Render.
 
 ## Display
 
@@ -35,7 +32,6 @@ Two charts — Central plant, then Field units — each on its own card and prin
 - Bars are grey-blue during working hours and orange outside them. Hatch where there is no reliable data.
 - Label each row with the unit name and `›`, its level and zone muted beside it.
 - Hover gives the on and off times, or why the data is not reliable.
-- Where units wait for the later pass, print `Not shown: 305 units.` under that chart.
 - No totals, no hour ticks. Restyle through the constants at the top of `render_runhours.py` — its docstring also holds the aggregate schema for a hand-rolled view.
 
 Hand over the HTML file every time and render it inline once where the client can. Never paste the HTML as text.
@@ -50,7 +46,6 @@ Unit name, over the same week — built by the build step, as no tool returns th
 
 ## Notes to print
 
-- The notes the build step prints, in its order, under the view.
-- Then the offer of the later pass, if there is one.
+The notes the build step prints, in its order, under the view.
 
 Follow-ups — a single unit, weekdays only, run-hour totals — re-script from `days.csv`. Never re-pull the same window.
