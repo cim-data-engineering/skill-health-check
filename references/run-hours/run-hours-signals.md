@@ -29,7 +29,7 @@ A metadata name with a unit in brackets, such as (MSV), (Hz), (RPM), (Fahrenheit
 
 A metadata belongs in an equipment type's list only if it reads running at every time the equipment runs. Compressor metadata does not, because the compressor cycles while the unit runs. This covers compressor metadata on fan units, a chiller's Compressor Status, and one stage of a multi-compressor chiller (names starting Chiller Compressor). Neither does metadata for a second fan or pump that can stop while the unit runs, such as an air handling unit's return fan. Enables and commands are not listed: they record whether the unit was allowed to run, not whether it ran.
 
-A unit with FCU in its name is treated as a Fan Coil Unit, whatever its equipment type in PEAK. A unit with no leaving water temperature of its own uses the one on its type's Common record, when the site has exactly one.
+Only actual units are drawn. A record with Common in its name covers several units, and one with HLI in its name repeats a chiller, so neither is drawn. A unit with no leaving water temperature of its own still uses the one on its type's Common record, when the site has exactly one. A unit with FCU in its name is treated as a Fan Coil Unit, whatever its equipment type in PEAK.
 
 To add a metadata, put its exact PEAK name in its equipment type's row, after checking in a PEAK chart that it reads running at every time the equipment runs.
 

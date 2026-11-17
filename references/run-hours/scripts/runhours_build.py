@@ -518,24 +518,22 @@ def note_lines(window, plan, units, notes, resets):
     # Every pass: why a unit is not drawn is known before any history is pulled.
     skipped = [u for u in plan["units"] if not u["pull"]]
     hit = {why: [u for u in skipped if u["why"] == why]
-           for why in ("command only", "no history this week", "pair point, members charted",
-                       "no points", "shared record", "temperature only",
-                       "no listed metadata")}
+           for why in ("command only", "no history this week", "no points", "shared record",
+                       "HLI record", "temperature only", "no listed metadata")}
     if hit["command only"]:
         lines.append("Only an enable, command or schedule, with no sensor to show the unit ran, not drawn: "
                      f"{listing(u['name'] for u in hit['command only'])} ({by_type(hit['command only'])}).")
     if hit["no history this week"]:
         lines.append(f"No history this week, not drawn: {listing(u['name'] for u in hit['no history this week'])}.")
-    if hit["pair point, members charted"]:
-        lines.append("Left out because their member units are shown: "
-                     f"{listing(u['name'] for u in hit['pair point, members charted'])}.")
     if hit["no points"]:
         lines.append(f"No points in PEAK, not drawn: {listing(u['name'] for u in hit['no points'])} "
                      f"({by_type(hit['no points'])}).")
     if hit["shared record"]:
-        n = len(hit["shared record"])
-        lines.append(f"{n} shared COMMON record{'s carry' if n != 1 else ' carries'} no sensor of "
-                     f"{'their' if n != 1 else 'its'} own, not drawn ({by_type(hit['shared record'])}).")
+        lines.append("Common records, not drawn, as each covers several units: "
+                     f"{listing(u['name'] for u in hit['shared record'])} ({by_type(hit['shared record'])}).")
+    if hit["HLI record"]:
+        lines.append("Chiller HLI records, not drawn, as each repeats its chiller: "
+                     f"{listing(u['name'] for u in hit['HLI record'])}.")
     if hit["temperature only"]:
         lines.append("Only a leaving water temperature, which is never used on its own, not drawn: "
                      f"{listing(u['name'] for u in hit['temperature only'])}.")

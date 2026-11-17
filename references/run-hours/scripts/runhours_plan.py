@@ -45,7 +45,6 @@ DEFAULT_HOST    = "https://ace.cimenviro.com"
 PAGE_ORDER      = ["Central plant", "Field units", "Other"]
 DAY_KEYS        = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 DAY_ABBR        = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-NUMBERED        = re.compile(r"([A-Z]*)0*(\d+)([A-Z]*)")    # 'P01A' -> P, 1, A; '10' -> '', 10, ''
 
 
 # ---- Reference tables ---------------------------------------------------------
@@ -317,52 +316,6 @@ def cmd_window(args):
 
 
 # ---- plan --------------------------------------------------------------------
-def _number(tok):
-    """(word, unit number) of a name token: 'P01A' -> ('P', '1A'), '10' -> ('', '10'), 'CHWP' -> ('CHWP', None)."""
-    m = NUMBERED.fullmatch(tok)
-    return (m.group(1), m.group(2) + m.group(3)) if m else (tok, None)
-
-
-def pair_members(unit):
-    """(name words, member numbers) for a COMMON record that names the units it pairs, else None.
-
-    'Common - PCHWP - 3/4', 'SHWP P-10A/B - COMMON', 'AHU-CHWP-10-11-COMMON' and
-    'PUMP-10&11-COMMON' all do. Only bare numbers count: 'VRV-L11-COMMON' is a
-    level's group and 'EWH-COMMON' names no units, so neither is a pair.
-    """
-    tokens = name_tokens(unit["name"])
-    if "COMMON" not in tokens:
-        return None
-    words, numbers, last = set(), set(), None
-    for tok in (t for t in tokens if t != "COMMON"):
-        word, number = _number(tok)
-        if number is not None and not word:
-            numbers.add(number)
-            last = number
-        elif len(tok) == 1 and last and last[-1].isalpha():
-            numbers.add(last[:-1] + tok)                       # '10A/B': B is 10B
-        else:
-            words.add(word)
-    return (words, numbers) if numbers else None
-
-
-def member_of(unit, words, numbers):
-    """Whether a unit is one of the pair: every word of the pair's name, and a number it lists."""
-    own, number = set(), None
-    for tok in name_tokens(unit["name"]):
-        word, num = _number(tok)
-        if word:
-            own.add(word)
-        if num is not None:
-            number = num
-    return number in numbers and words <= own
-
-
-def signal_grade(unit):
-    """1 for a unit drawn from a status or analog, else 0."""
-    return 1 if {p["role"] for p in unit["pull"]} & {"status", "analog"} else 0
-
-
 def read_units(paths):
     """Discovered units with their points, de-duplicated across pages.
 
@@ -415,6 +368,10 @@ def pick_points(unit, rules):
             seen.add(base_name(c["name"]))
             pull.append(c)
     unit["temps"] = [{"fav_id": c["fav_id"], "name": c["name"], "role": "temp"} for c in pull if c["role"] == "temp"]
+    tokens = name_tokens(unit["name"])
+    if "COMMON" in tokens or "HLI" in tokens:            # not a unit: its temperature can still serve its units
+        unit["pull"], unit["why"] = [], "shared record" if "COMMON" in tokens else "HLI record"
+        return
     if not any(c["role"] in SENSOR_ROLES for c in pull):
         pull = []                                  # a temperature is never the only metadata used
     unit["pull"] = [dict({k: c[k] for k in ("fav_id", "name", "role")}, **({"state": True} if c["state"] else {}))
@@ -429,8 +386,6 @@ def pick_points(unit, rules):
         unit["probe"] = {"fav_id": best["fav_id"], "unit": unit["name"], "point": best["name"]}
     elif not unit["points"]:
         unit["why"] = "no points"
-    elif "COMMON" in name_tokens(unit["name"]):
-        unit["why"] = "shared record"
     elif unit["temps"]:
         unit["why"] = "temperature only"
     elif any(COMMAND_END.search(base_name(n)) for n in names):
@@ -452,22 +407,6 @@ def borrow_shared_temperature(units):
                                   "equipment_id": src["equipment_id"], "shared": src["name"]})
 
 
-def drop_covered_pairs(units):
-    """Drop a COMMON pair record where a member is drawn from a signal at least as good.
-
-    Kept where the pair is the only record of the pumps running: a pair status
-    beside members that carry only enables, which are not drawn.
-    """
-    for unit in units:
-        pair = pair_members(unit)
-        if pair and unit["pull"] and any(
-                other is not unit and other["type"] == unit["type"] and other["pull"]
-                and not pair_members(other) and member_of(other, *pair)
-                and signal_grade(other) >= signal_grade(unit)
-                for other in units):
-            unit["why"], unit["pull"] = "pair point, members charted", []
-
-
 def cmd_plan(args):
     work = Path(args.workdir)
     window = json.loads((work / "window.json").read_text())
@@ -485,7 +424,6 @@ def cmd_plan(args):
             unit["regrouped_from"] = rules.types[peak]["name"]
         pick_points(unit, rules)
         units.append(unit)
-    drop_covered_pairs(units)
     borrow_shared_temperature(units)
 
     def order(u):
@@ -532,9 +470,9 @@ WHY_TEXT = {"temperature only": "only a temperature, which is never used on its 
             "no listed metadata": "none of the metadata listed for its type",
             "no history this week": "a run point, but no history this week",
             "command only": "only an enable, command or schedule, no sensor",
-            "shared record": "a COMMON record with no sensor of its own",
-            "no points": "no points in PEAK",
-            "pair point, members charted": "a COMMON pair record whose members are drawn"}
+            "shared record": "a Common record, which covers several units",
+            "HLI record": "a chiller's HLI record, which repeats the chiller",
+            "no points": "no points in PEAK"}
 
 
 def print_summary(plan):
