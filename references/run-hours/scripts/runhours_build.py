@@ -360,28 +360,10 @@ def chart_link(window, unit, favs):
             + "".join(f"&fav-{eid}={','.join(str(x) for x in ids)}" for eid, ids in groups.items()))
 
 
-NO_RUN_METADATA = ("command only", "no points", "temperature only", "no listed metadata")
-
-
 def not_shown_line(plan, page, max_pass):
-    """Under a chart: how many of the page's units are not on it, and why in a word. Names are in the notes.
-
-    COMMON and pair records are left out of the count: they are records, not units.
-    """
-    units = [u for u in plan["units"] if u.get("page") == page]
-    later = Counter(u["type_name"] for u in units if u["pull"] and u["pass"] > max_pass)
-    no_data = sum(1 for u in units if not u["pull"] and u.get("why") == "no history this week")
-    no_meta = sum(1 for u in units if not u["pull"] and u.get("why") in NO_RUN_METADATA)
-    parts = []
-    if later:
-        n = sum(later.values())
-        types = f" ({', '.join(f'{t} {k}' for t, k in later.items())})" if len(later) <= 3 else ""
-        parts.append(f"{units_text(n)} not fetched yet{types}")
-    if no_data:
-        parts.append(f"{units_text(no_data) if not parts else no_data} with no data this week")
-    if no_meta:
-        parts.append(f"{units_text(no_meta) if not parts else no_meta} with no metadata that shows running")
-    return ("Not shown: " + " · ".join(parts) + ". The notes name them.") if parts else ""
+    """Under a chart: how many of the page's units with listed metadata are not on it yet."""
+    n = sum(1 for u in plan["units"] if u.get("page") == page and u["pull"] and u["pass"] > max_pass)
+    return f"Not shown: {units_text(n)}." if n else ""
 
 
 def signal_kind(point):

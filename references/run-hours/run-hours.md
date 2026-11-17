@@ -70,7 +70,7 @@ Two pages, stacked in one file and printing one chart per sheet: **Central plant
 | Legend | During working hours, Outside working hours, and No reliable data only when a page uses it |
 | Labels | The unit name, indented under the group, cut with "…" when too long, a "›" after each. Its level and zone sit right-aligned before the week, smaller and muted: `L3 · Open Office`. A default zone (`Zone1`), one that repeats the level or is in the name, is left out; a long zone is shortened while 8 characters of it show, else the level stands alone, else neither: never a fragment. Hovering gives the full name, the metadata the row is drawn from, and level and zone as PEAK has them |
 | Hover | "On Mon 14 07:00 to Tue 15 01:15", "Running all week", "Did not run this week", or why the data is not reliable |
-| Not shown | A muted line under each chart counting the page's units that are not on it: not fetched yet (the later pass, by type), no data this week, and no metadata that shows running. COMMON and pair records are not counted. A page whose units are all not shown still gets its card with this line. The notes name the units |
+| Not shown | A muted line under each chart, "Not shown: 305 units.", counting the page's units with listed metadata that are not fetched yet. A page whose units are all not shown still gets its card with this line |
 
 No totals, no hour ticks, no part-hour shading, and never an em or en dash in the page. Colours, fonts and layout are named constants at the top of the renderer — restyle there, not in prose.
 
@@ -154,7 +154,7 @@ runhours_plan.py last     → when the site last reported
           ]
         }
       ],
-      "not_shown": "str"         // the line under the chart counting units not on it, or ""
+      "not_shown": "str"         // "Not shown: 305 units.", or "" when every unit is on the chart
     }
   ],
   "footer": "str",
